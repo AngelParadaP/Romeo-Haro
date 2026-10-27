@@ -11,7 +11,6 @@ function lines(ctx:CanvasRenderingContext2D,text:string,maxWidth:number,maxLines
 export async function invitationFile(url:string,title:string,message:string){
   const canvas=document.createElement('canvas');canvas.width=1200;canvas.height=1600;const ctx=canvas.getContext('2d');if(!ctx)throw new Error('No se pudo preparar la invitación.');
   ctx.fillStyle='#e7ecdf';ctx.fillRect(0,0,1200,1600);ctx.fillStyle='#fbfcf7';ctx.beginPath();ctx.roundRect(48,48,1104,1504,30);ctx.fill();ctx.strokeStyle='#d5dfc9';ctx.lineWidth=2;ctx.stroke();
-  ctx.strokeStyle='#6c8060';ctx.lineWidth=3;ctx.save();ctx.translate(600,125);for(let i=0;i<8;i++){ctx.rotate(Math.PI/4);ctx.beginPath();ctx.moveTo(0,9);ctx.lineTo(0,24);ctx.stroke();}ctx.restore();
   ctx.textAlign='center';ctx.fillStyle='#6d8063';ctx.font='20px Arial';ctx.fillText('UN EVENTO. TODAS LAS MIRADAS.',600,200);
   ctx.fillStyle='#294c3c';ctx.font='58px Georgia';const titleLines=lines(ctx,title,940,3);titleLines.forEach((line,i)=>ctx.fillText(line,600,290+i*70));
   ctx.fillStyle='#6b7a63';ctx.font='30px Arial';lines(ctx,message||'Te invitamos a compartir tus mejores recuerdos.',940,3).forEach((line,i)=>ctx.fillText(line,600,510+i*42));

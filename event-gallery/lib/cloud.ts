@@ -34,7 +34,7 @@ export async function startSession(eventId: string | null, captchaToken?: string
   return { userId: user.id, admin: Boolean(admin.data), events: await loadEvents(eventId) };
 }
 export async function loadEvents(eventId: string | null = null): Promise<GalleryEvent[]> {
-  let query = supabase().from("events").select("id,created_at,title,date,category,cover,active,description,cover_path,cover_x,cover_y,cover_zoom,uploads_open_at,uploads_close_at,photos(count)").is("deleted_at", null).order("created_at", { ascending: false });
+  let query = supabase().from("events").select("id,created_at,title,date,category,cover,active,description,invitation_text,cover_path,cover_x,cover_y,cover_zoom,uploads_open_at,uploads_close_at,photos(count)").is("deleted_at", null).order("created_at", { ascending: false });
   if (eventId) query = query.eq("id", eventId);
   else {
     const user = await supabase().auth.getUser(); check(user.error);
@@ -50,13 +50,14 @@ export async function loadEvents(eventId: string | null = null): Promise<Gallery
       cover = signed.data.signedUrl;
     }
     return { id: row.id, createdAt: row.created_at, title: row.title, date: row.date, category: row.category, active: row.active, cover,
-      description: row.description, coverPath: row.cover_path, coverX: row.cover_x, coverY: row.cover_y, coverZoom: Number(row.cover_zoom),
+      description: row.description, invitationText:row.invitation_text, coverPath: row.cover_path, coverX: row.cover_x, coverY: row.cover_y, coverZoom: Number(row.cover_zoom),
       uploadsOpenAt: row.uploads_open_at, uploadsCloseAt: row.uploads_close_at, photos: [], photoCount: row.photos?.[0]?.count ?? 0 };
   }));
 }
 export async function persistEvent(event: GalleryEvent, exists: boolean) {
   const db = supabase();
   const values = { title: event.title, date: event.date, category: event.category, cover: event.coverPath ? "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=85" : event.cover, active: event.active,
+    invitation_text:event.invitationText ?? 'Te invitamos a compartir tus mejores recuerdos.',
     description: event.description ?? "Un día especial. Todas las miradas. Un mismo recuerdo.", cover_path: event.coverPath || null,
     cover_x: event.coverX ?? 50, cover_y: event.coverY ?? 50, cover_zoom: event.coverZoom ?? 1,
     uploads_open_at: event.uploadsOpenAt || null, uploads_close_at: event.uploadsCloseAt || null };

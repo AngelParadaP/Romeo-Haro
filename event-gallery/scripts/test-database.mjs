@@ -108,6 +108,12 @@ await test('Complete download manifest includes other pages and filters private 
   assert.equal((await db.query('select * from public.download_page($1,null,$2,true)',[a,snapshot])).rows.length,1);
 });
 await as(owner);
+await test('Invitation text persists for its photographer and is constrained',async()=>{
+  const result=await db.query("update public.events set invitation_text='Comparte tus recuerdos con nosotros.' where id=$1 returning invitation_text",[a]);
+  assert.equal(result.rows[0].invitation_text,'Comparte tus recuerdos con nosotros.');
+  await assert.rejects(()=>db.query("update public.events set invitation_text='   ' where id=$1",[a]));
+  await assert.rejects(()=>db.query('update public.events set invitation_text=$1 where id=$2',['x'.repeat(141),a]));
+});
 await test('Photographer can personalize text and crop without changing ownership', async () => {
   const result=await db.query("update public.events set description='Bienvenidos',cover_x=20,cover_y=80,cover_zoom=1.5 where id=$1 returning description,cover_x",[a]);
   assert.equal(result.rows[0].description,'Bienvenidos');assert.equal(result.rows[0].cover_x,20);
@@ -160,6 +166,12 @@ await test('Studio contact belongs to its photographer and validates public fiel
   assert.equal((await db.query('select * from public.studio_profiles')).rows.length,0);
 });
 await as(guest);
+await test('Guests can read the saved invitation but cannot change its text',async()=>{
+  assert.equal((await db.query('select invitation_text from public.events where id=$1',[a])).rows[0].invitation_text,'Comparte tus recuerdos con nosotros.');
+  const changed=await db.query("update public.events set invitation_text='Texto de invitado' where id=$1 returning id",[a]);
+  assert.equal(changed.rows.length,0);
+  assert.equal((await db.query('select invitation_text from public.events where id=$1',[a])).rows[0].invitation_text,'Comparte tus recuerdos con nosotros.');
+});
 await test('Members can open event contact but cannot enumerate or modify studio profiles',async()=>{
   assert.equal((await db.query('select * from public.studio_profiles')).rows.length,0);
   const result=(await db.query('select public.event_contact($1) as contact',[a])).rows[0].contact;

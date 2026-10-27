@@ -25,7 +25,7 @@ export function Access({ guest = false, onGuest, onLogin }: { guest?: boolean; o
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  return <div className="access-shell"><section className="access-card"><a className="brand" href="/">r<span>h</span><i><Icon name="sparkle" size={30}/></i></a><span className="eyebrow">{guest ? "RECUERDOS COMPARTIDOS" : "TU ESTUDIO, TU ESPACIO"}</span><h1>{guest ? "Cada mirada cuenta." : "Bienvenido de nuevo."}</h1><p>{guest ? "Entra al evento para ver las fotos y compartir tus recuerdos. Quienes tengan el enlace podrán ver las imágenes." : "Inicia sesión con la cuenta de fotógrafo autorizada en Supabase."}</p><form onSubmit={async e => {
+  return <div className="access-shell"><section className="access-card"><a className="brand" href="/">r<span>h</span></a><span className="eyebrow">{guest ? "RECUERDOS COMPARTIDOS" : "TU ESTUDIO, TU ESPACIO"}</span><h1>{guest ? "Cada mirada cuenta." : "Bienvenido de nuevo."}</h1><p>{guest ? "Entra al evento para ver las fotos y compartir tus recuerdos. Quienes tengan el enlace podrán ver las imágenes." : "Inicia sesión con la cuenta de fotógrafo autorizada en Supabase."}</p><form onSubmit={async e => {
     e.preventDefault(); setBusy(true); setError("");
     const form = new FormData(e.currentTarget);
     try {

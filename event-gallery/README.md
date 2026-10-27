@@ -30,7 +30,7 @@ Sin variables de Supabase, `pnpm dev` conserva la demo local anterior. Si config
 
 1. Entra en https://supabase.com/dashboard y crea un proyecto dentro de tu organización. Ejemplo de nombre: `romeo-haro`. Elige una región cercana a tus invitados en México; una región de Estados Unidos cercana suele ser un punto de partida razonable. Guarda la contraseña de la base en tu gestor de contraseñas; la app no la necesita.
 2. Espera a que el proyecto esté disponible.
-3. Abre **SQL Editor** y ejecuta los archivos de `supabase/migrations/` en orden: primero `202610270001_initial.sql` después `202610270002_fix_event_insert_returning.sql` después `202610270003_guest_experience.sql` y finalmente `202610270004_studio_and_categories.sql`, cada uno una sola vez en un proyecto nuevo. Se ejecuta en una transacción y crea tablas, funciones, índices, permisos y el bucket privado. Si hay un error, corrígelo antes de volver a ejecutarlo; no omitas partes.
+3. Abre **SQL Editor** y ejecuta los archivos de `supabase/migrations/` en orden: primero `202610270001_initial.sql` después `202610270002_fix_event_insert_returning.sql` después `202610270003_guest_experience.sql` después `202610270004_studio_and_categories.sql` y finalmente `202610270005_invitation_text.sql`, cada uno una sola vez en un proyecto nuevo. Se ejecuta en una transacción y crea tablas, funciones, índices, permisos y el bucket privado. Si hay un error, corrígelo antes de volver a ejecutarlo; no omitas partes.
 4. En **Authentication → Sign In / Providers**, habilita Email y **Anonymous Sign-Ins**. Mantén habilitada la creación de nuevos usuarios para permitir las sesiones de los invitados. La aplicación no ofrece registro de fotógrafos y crear una cuenta en Auth nunca concede acceso al panel: ese permiso se controla con `admin_users`. Las cuentas de fotógrafo se crean manualmente en el siguiente paso.
 5. En **Authentication → Users → Add user**, crea tu cuenta de fotógrafo con correo y contraseña. Usa la opción de confirmar el correo al crearla, o completa su confirmación antes de iniciar sesión.
 6. Copia el **UUID del usuario** creado y ejecuta en SQL Editor:
@@ -186,11 +186,11 @@ En **Tu espacio → Contacto del estudio**, configura nombre, correo, WhatsApp c
 
 ### Invitación con QR
 
-Fotógrafo e invitados pueden compartir el enlace y descargar una **invitación PNG de 1200 × 1600** con nombre del evento, mensaje editable y QR. El código conserva margen blanco para facilitar el escaneo. El botón de compartir abre el menú nativo si existe; siempre queda la opción de copiar el enlace o descargar el PNG. Genera la invitación desde el dominio final antes de imprimirla: una invitación de localhost o preview no abre el evento de producción. No se publica nada automáticamente en WhatsApp u otras apps.
+Fotógrafo e invitados pueden compartir el enlace y descargar una **invitación PNG de 1200 × 1600** con nombre del evento, mensaje configurado por el fotógrafo y QR. El código conserva margen blanco para facilitar el escaneo. El botón de compartir abre el menú nativo si existe; siempre queda la opción de copiar el enlace o descargar el PNG. Genera la invitación desde el dominio final antes de imprimirla: una invitación de localhost o preview no abre el evento de producción. No se publica nada automáticamente en WhatsApp u otras apps.
 
 ### Guardar en un celular
 
-La web **no puede escribir directamente en la fototeca ni elegir por el usuario el destino del menú nativo**. Al pulsar la flecha de una foto, se prepara el archivo y aparece un segundo botón **Guardar o compartir**: esa pulsación mantiene la activación del usuario requerida por Web Share. El sistema ofrecerá Fotos, Archivos u otras aplicaciones según el dispositivo/navegador. Se mantiene **Descargar archivo** como alternativa. Cancelar el menú no dispara una descarga automática.
+La web **no puede escribir directamente en la fototeca ni elegir por el usuario el destino del menú nativo**. Al pulsar la flecha de una foto, se prepara la imagen y aparecen botones separados **Guardar** y **Compartir**. En navegadores compatibles, cada pulsación abre el menú del sistema con una explicación de la acción que debe elegirse. El sistema ofrecerá Fotos, Archivos u otras aplicaciones según el dispositivo/navegador. En la foto individual no se ofrecen descarga de archivo ni ZIP. Si el navegador no permite compartir archivos, Guardar abre la imagen para mantenerla pulsada y elegir Guardar imagen (o usar clic derecho en computadora). Cancelar el menú no dispara una descarga automática.
 
 La opción **Guardar fotos en el móvil** prepara toda la selección (galería o favoritos) por grupos de hasta 10 imágenes y aproximadamente 20 MB para abrir el menú nativo sin un ZIP. El usuario avanza y comparte cada grupo. Si el navegador no admite grupos, se ofrecen las imágenes individualmente. Un ZIP puede compartirse/guardarse como archivo si el sistema lo permite, pero **no se importa directamente en Fotos**: hay que extraer sus imágenes o usar la opción sin ZIP. No se garantiza el destino Fotos ni que todas las versiones de iOS/Android ofrezcan las mismas acciones; requiere prueba en un dispositivo real con HTTPS.
 
@@ -204,3 +204,17 @@ La opción **Guardar fotos en el móvil** prepara toda la selección (galería o
 - Calendario mensual que empieza en lunes, categorías por color, navegación de meses, botón Hoy, agenda de la fecha seleccionada y próximos eventos. En pantallas estrechas se simplifican las celdas y la agenda muestra los detalles. Este calendario vive dentro de la aplicación; no sincroniza con Outlook ni Google Calendar.
 
 Las pruebas de experiencia incluyen ordenación, cuadrícula de calendario, años bisiestos, límites del arrastre y alternativas de Web Share. Las pruebas de PostgreSQL incluyen categorías nuevas y aislamiento de contacto entre fotógrafos/invitados. El menú de Fotos del sistema y el comportamiento de mouse/trackpad deben comprobarse también en los dispositivos de uso real.
+
+## Ajuste: invitación del fotógrafo y acciones individuales
+
+Aplica **solo** `supabase/migrations/202610270005_invitation_text.sql` si ya instalaste las migraciones 001–004, y después despliega el código nuevo. `events.invitation_text` guarda hasta 140 caracteres, con el mensaje predeterminado para eventos existentes. La política RLS del evento permite modificarlo únicamente al fotógrafo autorizado que lo posee.
+
+En **Compartir evento y QR**, el fotógrafo dispone del editor y el botón **Guardar texto**. Ese mensaje persiste entre dispositivos y es el que usan los invitados al descargar/compartir la invitación. En la vista de invitados no se renderizan el editor ni el campo del enlace: solo la invitación y las acciones de copiar/compartir/descargar/abrir. Ocultar el campo no vuelve secreto el enlace: el QR y los botones lo necesitan para funcionar.
+
+Se retiró la estrella decorativa de la invitación y de la marca en la interfaz; la acción de favoritos usa ahora un marcador.
+
+Las fotos individuales tienen solo **Guardar** y **Compartir**, con instrucciones separadas. **Guardar no escribe directamente en la fototeca de iOS**: la web debe abrir el menú nativo y el usuario elige Guardar imagen. Compartir abre ese mismo menú para seleccionar un destinatario o aplicación. Los navegadores no permiten preseleccionar esas acciones del sistema. No se ofrece una descarga de archivo o ZIP en el modal individual. Los ZIP siguen disponibles en la galería y favoritos para conjuntos completos.
+
+Al pulsar Guardar fotografía desde la vista ampliada, se cierra el zoom antes de abrir el modal de opciones. Así solo queda un modal de fotografía abierto. La opción móvil por grupos también separa Guardar imágenes y Compartir; cuando el navegador no admite grupos, ofrece las acciones individuales.
+
+Verificado con PostgreSQL embebido: persistencia, límite de longitud y rechazo de cambios de texto por invitados. Verificado en navegador de prueba: ausencia de editor/campo de enlace para invitados, dos botones individuales y un único modal al pasar del zoom a las opciones. La elección de Guardar imagen en el menú nativo debe comprobarse en iOS/Android real.

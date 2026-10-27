@@ -1,6 +1,6 @@
 import { Zip, ZipPassThrough } from 'fflate';
 export type ArchiveFile = { id: string; blob: Blob };
-export type PreparedArchive = { name: string; url: string; size: number };
+export type PreparedArchive = { name: string; url: string; size: number; blob:Blob };
 export async function buildPhotoArchives(files: AsyncIterable<ArchiveFile>, label: string, onProgress: (count: number) => void, signal: AbortSignal, partLimit = 100*1024*1024): Promise<PreparedArchive[]> {
   const archives: PreparedArchive[] = [];
   let zip: Zip, chunks: BlobPart[], size=0, count=0, inPart=0, zipError: Error | null=null;
@@ -14,7 +14,7 @@ export async function buildPhotoArchives(files: AsyncIterable<ArchiveFile>, labe
     if(zipError)throw zipError;
     await new Promise<void>((resolve,reject)=>{finished=resolve;rejected=reject;zip.end();});
     const blob=new Blob(chunks,{type:'application/zip'});
-    archives.push({name:`${label}-${String(archives.length+1).padStart(2,'0')}.zip`,url:URL.createObjectURL(blob),size:blob.size});
+    archives.push({name:`${label}-${String(archives.length+1).padStart(2,'0')}.zip`,url:URL.createObjectURL(blob),size:blob.size,blob});
     finished=undefined;rejected=undefined;
   };
   reset();

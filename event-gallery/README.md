@@ -30,7 +30,7 @@ Sin variables de Supabase, `pnpm dev` conserva la demo local anterior. Si config
 
 1. Entra en https://supabase.com/dashboard y crea un proyecto dentro de tu organización. Ejemplo de nombre: `romeo-haro`. Elige una región cercana a tus invitados en México; una región de Estados Unidos cercana suele ser un punto de partida razonable. Guarda la contraseña de la base en tu gestor de contraseñas; la app no la necesita.
 2. Espera a que el proyecto esté disponible.
-3. Abre **SQL Editor** y ejecuta los archivos de `supabase/migrations/` en orden: primero `202610270001_initial.sql` después `202610270002_fix_event_insert_returning.sql` y finalmente `202610270003_guest_experience.sql`, cada uno una sola vez en un proyecto nuevo. Se ejecuta en una transacción y crea tablas, funciones, índices, permisos y el bucket privado. Si hay un error, corrígelo antes de volver a ejecutarlo; no omitas partes.
+3. Abre **SQL Editor** y ejecuta los archivos de `supabase/migrations/` en orden: primero `202610270001_initial.sql` después `202610270002_fix_event_insert_returning.sql` después `202610270003_guest_experience.sql` y finalmente `202610270004_studio_and_categories.sql`, cada uno una sola vez en un proyecto nuevo. Se ejecuta en una transacción y crea tablas, funciones, índices, permisos y el bucket privado. Si hay un error, corrígelo antes de volver a ejecutarlo; no omitas partes.
 4. En **Authentication → Sign In / Providers**, habilita Email y **Anonymous Sign-Ins**. Mantén habilitada la creación de nuevos usuarios para permitir las sesiones de los invitados. La aplicación no ofrece registro de fotógrafos y crear una cuenta en Auth nunca concede acceso al panel: ese permiso se controla con `admin_users`. Las cuentas de fotógrafo se crean manualmente en el siguiente paso.
 5. En **Authentication → Users → Add user**, crea tu cuenta de fotógrafo con correo y contraseña. Usa la opción de confirmar el correo al crearla, o completa su confirmación antes de iniciar sesión.
 6. Copia el **UUID del usuario** creado y ejecuta en SQL Editor:
@@ -175,3 +175,32 @@ Para una instalación que ya funciona, aplica **solo** `supabase/migrations/2026
 Validación adicional: `pnpm test:experience` comprueba identidad por evento, búsqueda, límites horarios, ZIP con todas las páginas, división de archivos y cancelación. `pnpm test:db` prueba las políticas reales con PostgreSQL embebido, incluyendo portadas privadas, descargas y bloqueo de cargas fuera de horario. Los WebSockets, CAPTCHA y Storage alojados deben verificarse después de ejecutar la migración y desplegar.
 
 Prueba de aceptación: entra desde dos navegadores al mismo evento, sube una foto en uno y confirma que aparece en el otro; recarga al invitado y comprueba que no se pide el nombre; marca favoritos y descarga su ZIP; configura un cierre cercano y confirma que se bloquean subidas mientras siguen funcionando la galería y las descargas.
+
+## Diseño, calendario, contacto e invitaciones
+
+En una instalación que ya tiene las migraciones 001–003, ejecuta **solo** `supabase/migrations/202610270004_studio_and_categories.sql` y después despliega el código actualizado. Esta migración amplía las categorías con **Quinceañera** y **Otros**, y crea `studio_profiles` con permisos por fotógrafo. No introduce variables de entorno ni servicios nuevos.
+
+### Contacto del estudio
+
+En **Tu espacio → Contacto del estudio**, configura nombre, correo, WhatsApp con código internacional y dirección. Los datos son opcionales salvo el nombre; la información se comparte con los invitados de todos tus eventos. El botón **Contacto** de la vista pública abre el modal con correo, enlace de WhatsApp y dirección con enlace a mapas. Los enlaces solo se abren al pulsarlos; la app no envía mensajes automáticamente. Los invitados no pueden enumerar los perfiles ni editarlos; la función `event_contact` entrega únicamente el contacto del propietario de un evento al que tienen acceso.
+
+### Invitación con QR
+
+Fotógrafo e invitados pueden compartir el enlace y descargar una **invitación PNG de 1200 × 1600** con nombre del evento, mensaje editable y QR. El código conserva margen blanco para facilitar el escaneo. El botón de compartir abre el menú nativo si existe; siempre queda la opción de copiar el enlace o descargar el PNG. Genera la invitación desde el dominio final antes de imprimirla: una invitación de localhost o preview no abre el evento de producción. No se publica nada automáticamente en WhatsApp u otras apps.
+
+### Guardar en un celular
+
+La web **no puede escribir directamente en la fototeca ni elegir por el usuario el destino del menú nativo**. Al pulsar la flecha de una foto, se prepara el archivo y aparece un segundo botón **Guardar o compartir**: esa pulsación mantiene la activación del usuario requerida por Web Share. El sistema ofrecerá Fotos, Archivos u otras aplicaciones según el dispositivo/navegador. Se mantiene **Descargar archivo** como alternativa. Cancelar el menú no dispara una descarga automática.
+
+La opción **Guardar fotos en el móvil** prepara toda la selección (galería o favoritos) por grupos de hasta 10 imágenes y aproximadamente 20 MB para abrir el menú nativo sin un ZIP. El usuario avanza y comparte cada grupo. Si el navegador no admite grupos, se ofrecen las imágenes individualmente. Un ZIP puede compartirse/guardarse como archivo si el sistema lo permite, pero **no se importa directamente en Fotos**: hay que extraer sus imágenes o usar la opción sin ZIP. No se garantiza el destino Fotos ni que todas las versiones de iOS/Android ofrezcan las mismas acciones; requiere prueba en un dispositivo real con HTTPS.
+
+### Panel del fotógrafo
+
+- Iconos SVG propios en lugar de símbolos que iOS transforma en emoji.
+- Botones con estados de foco, interacción y controles táctiles; interruptor accesible para activar el evento.
+- Portada con arrastre mediante mouse o dedo, zoom por rueda/trackpad, controles deslizantes y ajustes con flechas. El zoom tiene límite de 1×–3× y el encuadre queda dentro de 0–100%.
+- Categorías en Tu espacio, combinadas con búsquedas por nombre/fecha y estados activo/archivado. Crear desde una categoría seleccionada la propone de forma predeterminada.
+- Orden por creación reciente/antigua, fecha ascendente/descendente, nombre o cantidad de fotos.
+- Calendario mensual que empieza en lunes, categorías por color, navegación de meses, botón Hoy, agenda de la fecha seleccionada y próximos eventos. En pantallas estrechas se simplifican las celdas y la agenda muestra los detalles. Este calendario vive dentro de la aplicación; no sincroniza con Outlook ni Google Calendar.
+
+Las pruebas de experiencia incluyen ordenación, cuadrícula de calendario, años bisiestos, límites del arrastre y alternativas de Web Share. Las pruebas de PostgreSQL incluyen categorías nuevas y aislamiento de contacto entre fotógrafos/invitados. El menú de Fotos del sistema y el comportamiento de mouse/trackpad deben comprobarse también en los dispositivos de uso real.

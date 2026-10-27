@@ -11,7 +11,7 @@ async function loadTS(path){
   return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
 }
 const {buildPhotoArchives}=await loadTS('../lib/archives.ts');
-const {uploadStatus,matchesEvent,rememberGuest,rememberedGuest}=await loadTS('../lib/event-utils.ts');
+const {uploadStatus,matchesEvent,rememberGuest,rememberedGuest,sortEvents,monthDays,cropFromDrag}=await loadTS('../lib/event-utils.ts');
 const store=new Map();globalThis.localStorage={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)};
 rememberGuest('event-a','user-a','Ana');
 assert.equal(rememberedGuest('event-a','user-a'),'Ana');
@@ -36,3 +36,19 @@ assert.equal(total,13);console.log('✓ ZIP export includes all 13 files, splits
 async function* empty(){}assert.deepEqual(await buildPhotoArchives(empty(),'empty',()=>{},new AbortController().signal),[]);
 const aborted=new AbortController();aborted.abort();await assert.rejects(()=>buildPhotoArchives(files(),'cancelled',()=>{},aborted.signal));
 console.log('✓ Empty exports and cancelled downloads do not produce archives');
+
+const ordered=[{...event,id:'b',title:'Zeta',date:'2026-12-01',createdAt:'2026-01-01',photos:[],photoCount:3},{...event,id:'a',title:'Ana',date:'2026-11-01',createdAt:'2026-02-01',photos:[],photoCount:8}];
+for(const sort of ['created-desc','date-asc','name','photos'])assert.equal(sortEvents(ordered,sort)[0].id,'a');
+for(const sort of ['created-asc','date-desc'])assert.equal(sortEvents(ordered,sort)[0].id,'b');
+assert.equal(ordered[0].id,'b');
+console.log('✓ Event ordering handles creation, dates, names and photo counts without mutating the source');
+const days=monthDays(2026,9);assert.equal(days.length,42);assert.equal(days[0].key,'2026-09-28');assert.equal(days.filter(day=>day.inMonth).length,31);assert.equal(monthDays(2028,1).filter(day=>day.inMonth).length,29);
+assert.equal(new Set(days.map(day=>day.key)).size,42);
+console.log('✓ Calendar uses Monday-first six-week grids, month boundaries and leap years');
+assert.deepEqual(cropFromDrag(50,50,100,-100,200,200,1),{x:0,y:100});assert.deepEqual(cropFromDrag(50,50,100,0,200,200,2),{x:25,y:50});assert.deepEqual(cropFromDrag(50,50,1000,-1000,200,200,1),{x:0,y:100});
+console.log('✓ Pointer crop stays within the image and accounts for zoom');
+const {canShareFiles,wasCancelled}=await loadTS('../lib/native-share.ts');
+Object.defineProperty(globalThis,'navigator',{configurable:true,value:{}});assert.equal(canShareFiles([]),false);
+Object.defineProperty(globalThis,'navigator',{configurable:true,value:{share:async()=>{},canShare:()=>true}});assert.equal(canShareFiles([new File(['test'],'test.jpg',{type:'image/jpeg'})]),true);
+Object.defineProperty(globalThis,'navigator',{configurable:true,value:{share:async()=>{},canShare:()=>{throw new Error('blocked');}}});assert.equal(canShareFiles([]),false);assert.equal(wasCancelled(new DOMException('cancelled','AbortError')),true);
+console.log('✓ Native saving falls back when file sharing is unavailable or blocked and recognizes cancellation');

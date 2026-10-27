@@ -15,3 +15,22 @@ export function rememberGuest(eventId: string, userId: string, name: string) {
 export function rememberedGuest(eventId: string, userId: string) {
   try { const stored = JSON.parse(localStorage.getItem(eventGuestKey(eventId)) || 'null'); return stored?.userId === userId && typeof stored?.name === 'string' ? stored.name.trim() : ''; } catch { return ''; }
 }
+
+export const eventCategories=['Boda','Cumpleaños','Celebración','Encuentro','Quinceañera','Otros'] as const;
+export type EventSort='created-desc'|'created-asc'|'date-asc'|'date-desc'|'name'|'photos';
+export function sortEvents(events:GalleryEvent[],sort:EventSort){
+  return [...events].sort((a,b)=>{
+    if(sort==='name')return a.title.localeCompare(b.title,'es');
+    if(sort==='photos')return (b.photoCount??b.photos.length)-(a.photoCount??a.photos.length);
+    if(sort==='date-asc'||sort==='date-desc')return (sort==='date-asc'?1:-1)*a.date.localeCompare(b.date);
+    return (sort==='created-asc'?1:-1)*(a.createdAt||'').localeCompare(b.createdAt||'');
+  });
+}
+export function monthDays(year:number,month:number){
+  const start=new Date(year,month,1,12);const offset=(start.getDay()+6)%7;
+  return Array.from({length:42},(_,i)=>{const date=new Date(year,month,1-offset+i,12);return {key:`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`,day:date.getDate(),inMonth:date.getMonth()===month};});
+}
+export function cropFromDrag(x:number,y:number,dx:number,dy:number,width:number,height:number,zoom:number){
+  const clamp=(n:number)=>Math.min(100,Math.max(0,n));
+  return {x:clamp(x-dx/Math.max(width,1)*100/zoom),y:clamp(y-dy/Math.max(height,1)*100/zoom)};
+}

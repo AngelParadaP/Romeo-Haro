@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Script from "next/script";
+import {Icon} from "./icon";
 import { supabase } from "@/lib/cloud";
 
 type TurnstileAPI = { render: (element: HTMLElement, options: Record<string, unknown>) => string; remove: (id: string) => void };
@@ -24,7 +25,7 @@ export function Access({ guest = false, onGuest, onLogin }: { guest?: boolean; o
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  return <div className="access-shell"><section className="access-card"><a className="brand" href="/">r<span>h</span><i>✳</i></a><span className="eyebrow">{guest ? "RECUERDOS COMPARTIDOS" : "TU ESTUDIO, TU ESPACIO"}</span><h1>{guest ? "Cada mirada cuenta." : "Bienvenido de nuevo."}</h1><p>{guest ? "Entra al evento para ver las fotos y compartir tus recuerdos. Quienes tengan el enlace podrán ver las imágenes." : "Inicia sesión con la cuenta de fotógrafo autorizada en Supabase."}</p><form onSubmit={async e => {
+  return <div className="access-shell"><section className="access-card"><a className="brand" href="/">r<span>h</span><i><Icon name="sparkle" size={30}/></i></a><span className="eyebrow">{guest ? "RECUERDOS COMPARTIDOS" : "TU ESTUDIO, TU ESPACIO"}</span><h1>{guest ? "Cada mirada cuenta." : "Bienvenido de nuevo."}</h1><p>{guest ? "Entra al evento para ver las fotos y compartir tus recuerdos. Quienes tengan el enlace podrán ver las imágenes." : "Inicia sesión con la cuenta de fotógrafo autorizada en Supabase."}</p><form onSubmit={async e => {
     e.preventDefault(); setBusy(true); setError("");
     const form = new FormData(e.currentTarget);
     try {
@@ -43,6 +44,6 @@ export function Access({ guest = false, onGuest, onLogin }: { guest?: boolean; o
     {guest ? <label>Tu nombre<input name="name" required maxLength={60} placeholder="¿Cómo te llamas?" autoComplete="name" /></label> : <><label>Correo electrónico<input name="email" type="email" autoComplete="username" required /></label><label>Contraseña<input name="password" type="password" autoComplete="current-password" required /></label></>}
     <Captcha key={attempt} onToken={setToken} />
     {error && <p role="alert" className="form-error">{error}</p>}
-    <button className="primary" disabled={busy || (!!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !token)}>{busy ? "Conectando…" : guest ? "Entrar al evento ↗" : "Entrar a mi estudio ↗"}</button>
+    <button className="primary" disabled={busy || (!!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !token)}>{busy ? "Conectando…" : guest ? "Entrar al evento" : "Entrar a mi estudio"}<Icon name="arrow"/></button>
   </form><small>{guest ? "Tu sesión y tus favoritos se conservan en este navegador." : "Las cuentas de fotógrafo se crean y autorizan desde Supabase."}</small></section></div>;
 }

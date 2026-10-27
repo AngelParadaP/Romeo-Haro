@@ -147,10 +147,32 @@ await test('Future opening blocks early uploads without hiding the gallery',asyn
   assert.equal((await db.query('select * from public.events where id=$1',[a])).rows.length,1);
 });
 await as(owner);await db.query('update public.events set uploads_open_at=null,uploads_close_at=null where id=$1',[a]);
+await test('Photographer can create Quinceañera and Otros categories',async()=>{
+  await db.query("update public.events set category='Quinceañera' where id=$1 returning id",[a]);
+  await db.query("update public.events set category='Otros' where id=$1 returning id",[a]);
+  await assert.rejects(()=>db.query("update public.events set category='Inventado' where id=$1",[a]));
+});
+await test('Studio contact belongs to its photographer and validates public fields',async()=>{
+  await db.query("insert into public.studio_profiles(name,email,whatsapp,address) values ('Estudio de prueba','estudio@example.com','+526691234567','Dirección de prueba')");
+  await assert.rejects(()=>db.query("update public.studio_profiles set whatsapp='javascript:invalid' where owner_id=$1",[owner]));
+  await as(owner2);
+  assert.equal((await db.query("update public.studio_profiles set name='Intrusión' where owner_id=$1 returning owner_id",[owner])).rows.length,0);
+  assert.equal((await db.query('select * from public.studio_profiles')).rows.length,0);
+});
+await as(guest);
+await test('Members can open event contact but cannot enumerate or modify studio profiles',async()=>{
+  assert.equal((await db.query('select * from public.studio_profiles')).rows.length,0);
+  const result=(await db.query('select public.event_contact($1) as contact',[a])).rows[0].contact;
+  assert.equal(result.name,'Estudio de prueba');assert.equal(result.email,'estudio@example.com');
+  await assert.rejects(()=>db.query('select public.event_contact($1)',[b]));
+  await assert.rejects(()=>db.query("insert into public.studio_profiles(name) values ('Intrusión')"));
+  assert.equal((await db.query("update public.studio_profiles set name='Intrusión' returning owner_id")).rows.length,0);
+});
 await as(outsider);
 await test('Uninvited user cannot read images or react', async () => {
   assert.equal((await db.query('select * from public.photos')).rows.length, 0);
   await assert.rejects(()=>db.query('select * from public.download_page($1)',[a]));
+  await assert.rejects(()=>db.query('select public.event_contact($1)',[a]));
   assert.equal((await db.query('select * from storage.objects')).rows.length, 0);
   await assert.rejects(() => db.query('insert into public.photo_likes(photo_id) values ($1)', [photo]));
 });
@@ -167,6 +189,7 @@ await as(guest);
 await test('Archiving revokes gallery reads, uploads and reactions', async () => {
   assert.equal((await db.query('select * from public.photos')).rows.length, 0);
   await assert.rejects(()=>db.query('select * from public.download_page($1)',[a]));
+  await assert.rejects(()=>db.query('select public.event_contact($1)',[a]));
   assert.equal((await db.query('select * from storage.objects')).rows.length, 0);
   await assert.rejects(() => db.query('select public.join_event($1)', [a]));
   await assert.rejects(() => db.query('insert into public.photo_likes(photo_id) values ($1)', [photo]));

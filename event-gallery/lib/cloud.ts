@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { GalleryEvent, Photo } from "./types";
+import type { GalleryEvent, Photo, StudioContact } from "./types";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -34,7 +34,7 @@ export async function startSession(eventId: string | null, captchaToken?: string
   return { userId: user.id, admin: Boolean(admin.data), events: await loadEvents(eventId) };
 }
 export async function loadEvents(eventId: string | null = null): Promise<GalleryEvent[]> {
-  let query = supabase().from("events").select("id,title,date,category,cover,active,description,cover_path,cover_x,cover_y,cover_zoom,uploads_open_at,uploads_close_at,photos(count)").is("deleted_at", null).order("created_at", { ascending: false });
+  let query = supabase().from("events").select("id,created_at,title,date,category,cover,active,description,cover_path,cover_x,cover_y,cover_zoom,uploads_open_at,uploads_close_at,photos(count)").is("deleted_at", null).order("created_at", { ascending: false });
   if (eventId) query = query.eq("id", eventId);
   else {
     const user = await supabase().auth.getUser(); check(user.error);
@@ -49,7 +49,7 @@ export async function loadEvents(eventId: string | null = null): Promise<Gallery
       if (!signed.data?.signedUrl) throw new Error("No se pudo cargar la portada del evento.");
       cover = signed.data.signedUrl;
     }
-    return { id: row.id, title: row.title, date: row.date, category: row.category, active: row.active, cover,
+    return { id: row.id, createdAt: row.created_at, title: row.title, date: row.date, category: row.category, active: row.active, cover,
       description: row.description, coverPath: row.cover_path, coverX: row.cover_x, coverY: row.cover_y, coverZoom: Number(row.cover_zoom),
       uploadsOpenAt: row.uploads_open_at, uploadsCloseAt: row.uploads_close_at, photos: [], photoCount: row.photos?.[0]?.count ?? 0 };
   }));
@@ -108,4 +108,16 @@ export async function uploadCover(eventId: string, userId: string, src: string) 
 }
 export async function discardCover(path: string) {
   const result = await supabase().storage.from("event-covers").remove([path]); check(result.error);
+}
+
+export async function loadStudio(eventId?: string):Promise<StudioContact|null>{
+  if(eventId){const result=await supabase().rpc('event_contact',{event_token:eventId});check(result.error);return result.data;}
+  const user=await existingUser();if(!user)throw new Error('Inicia sesión para editar el estudio.');
+  const result=await supabase().from('studio_profiles').select('name,email,whatsapp,address').eq('owner_id',user.id).maybeSingle();check(result.error);return result.data;
+}
+export async function saveStudio(contact:StudioContact){
+  const user=await existingUser();if(!user)throw new Error('Inicia sesión para guardar el contacto.');
+  // Preserve ownership. Do not UPDATE owner_id via an upsert.
+  const existing=await supabase().from('studio_profiles').select('owner_id').eq('owner_id',user.id).maybeSingle();check(existing.error);
+  const result=existing.data?await supabase().from('studio_profiles').update(contact).eq('owner_id',user.id).select('owner_id').single():await supabase().from('studio_profiles').insert({...contact,owner_id:user.id}).select('owner_id').single();check(result.error);
 }

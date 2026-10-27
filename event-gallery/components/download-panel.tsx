@@ -3,8 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import { cloudConfigured } from '@/lib/cloud';
 import { collectionFiles } from '@/lib/downloads';
 import { buildPhotoArchives, type PreparedArchive } from '@/lib/archives';
+import {Icon} from './icon';
+import {MobilePhotosDialog} from './mobile-photos-dialog';
+import {canShareFiles,shareFiles,wasCancelled} from '@/lib/native-share';
 import type { Photo } from '@/lib/types';
 export function DownloadPanel({ eventId, favorites, localPhotos }: { eventId:string; favorites:boolean; localPhotos:Photo[] }) {
+  const [mobile,setMobile]=useState(false);
+  const [sharing,setSharing]=useState(false);
   const [busy,setBusy]=useState(false);const [count,setCount]=useState(0);const [error,setError]=useState('');const [archives,setArchives]=useState<PreparedArchive[]>([]);
   const controller=useRef<AbortController|null>(null);const urls=useRef<PreparedArchive[]>([]);
   useEffect(()=>()=>{controller.current?.abort();for(const item of urls.current)URL.revokeObjectURL(item.url);},[]);
@@ -17,5 +22,5 @@ export function DownloadPanel({ eventId, favorites, localPhotos }: { eventId:str
       urls.current=result;setArchives(result);if(!result.length)setError('No hay fotografías para descargar.');
     }catch(err){if(!controller.current?.signal.aborted)setError(err instanceof Error?err.message:'No se pudo preparar el ZIP.');}
     finally{setBusy(false);}
-  }}>↓ {busy?`Preparando ${count} fotos…`:favorites?'Descargar mis favoritos (ZIP)':'Descargar toda la galería (ZIP)'}</button>{busy&&<button className="back" onClick={()=>controller.current?.abort()}>Cancelar</button>}</div><small>Incluye todas las páginas. Las galerías grandes se dividen en paquetes de aproximadamente 100 MB.</small>{error&&<p role="alert" className="form-error">{error}</p>}{archives.length>0&&<div className="archive-links" role="status">{archives.map(item=><a key={item.url} href={item.url} download={item.name}>↓ {item.name} · {(item.size/1024/1024).toFixed(1)} MB</a>)}</div>}</section>;
+  }}><Icon name="download"/>{busy?`Preparando ${count} fotos…`:favorites?'Descargar mis favoritos (ZIP)':'Descargar toda la galería (ZIP)'}</button><button className="secondary" onClick={()=>setMobile(true)}><Icon name="image"/>Guardar fotos en el móvil</button>{busy&&<button className="back" onClick={()=>controller.current?.abort()}>Cancelar</button>}</div><small>Incluye todas las páginas. Las galerías grandes se dividen en paquetes de aproximadamente 100 MB.</small>{error&&<p role="alert" className="form-error">{error}</p>}{archives.length>0&&<div className="archive-links" role="status">{archives.map(item=>{const file=new File([item.blob],item.name,{type:'application/zip'});return <div className="archive-item" key={item.url}><a href={item.url} download={item.name}><Icon name="download"/>{item.name} · {(item.size/1024/1024).toFixed(1)} MB</a>{canShareFiles([file])&&<button className="text-link" disabled={sharing} onClick={async()=>{setSharing(true);try{await shareFiles([file],item.name);}catch(err){if(!wasCancelled(err))setError('No se pudo compartir el ZIP. Puedes descargarlo.');}finally{setSharing(false);}}}><Icon name="share"/>Guardar o compartir paquete</button>}</div>;})}</div>}{mobile&&<MobilePhotosDialog eventId={eventId} favorites={favorites} localPhotos={localPhotos} onClose={()=>setMobile(false)}/>}</section>;
 }

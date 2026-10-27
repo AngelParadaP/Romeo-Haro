@@ -30,7 +30,7 @@ Sin variables de Supabase, `pnpm dev` conserva la demo local anterior. Si config
 
 1. Entra en https://supabase.com/dashboard y crea un proyecto dentro de tu organización. Ejemplo de nombre: `romeo-haro`. Elige una región cercana a tus invitados en México; una región de Estados Unidos cercana suele ser un punto de partida razonable. Guarda la contraseña de la base en tu gestor de contraseñas; la app no la necesita.
 2. Espera a que el proyecto esté disponible.
-3. Abre **SQL Editor** y ejecuta el contenido completo de `supabase/migrations/202610270001_initial.sql` **una sola vez**, en un proyecto nuevo. Se ejecuta en una transacción y crea tablas, funciones, índices, permisos y el bucket privado. Si hay un error, corrígelo antes de volver a ejecutarlo; no omitas partes.
+3. Abre **SQL Editor** y ejecuta los archivos de `supabase/migrations/` en orden: primero `202610270001_initial.sql` después `202610270002_fix_event_insert_returning.sql` y finalmente `202610270003_guest_experience.sql`, cada uno una sola vez en un proyecto nuevo. Se ejecuta en una transacción y crea tablas, funciones, índices, permisos y el bucket privado. Si hay un error, corrígelo antes de volver a ejecutarlo; no omitas partes.
 4. En **Authentication → Sign In / Providers**, habilita Email y **Anonymous Sign-Ins**. Mantén habilitada la creación de nuevos usuarios para permitir las sesiones de los invitados. La aplicación no ofrece registro de fotógrafos y crear una cuenta en Auth nunca concede acceso al panel: ese permiso se controla con `admin_users`. Las cuentas de fotógrafo se crean manualmente en el siguiente paso.
 5. En **Authentication → Users → Add user**, crea tu cuenta de fotógrafo con correo y contraseña. Usa la opción de confirmar el correo al crearla, o completa su confirmación antes de iniciar sesión.
 6. Copia el **UUID del usuario** creado y ejecuta en SQL Editor:
@@ -139,13 +139,13 @@ Los QR se generan con el dominio desde el que se abre la app. No imprimas un QR 
 - **Retirar evento** es una baja lógica: oculta evento y fotos, y bloquea nuevas visitas, pero conserva sus archivos y registros. Esto evita borrados parciales entre la base y Storage. Los archivos retirados siguen ocupando espacio. La recuperación se hace desde SQL Editor restaurando `deleted_at = null` y el estado deseado.
 - La purga definitiva no está automatizada. Para liberar espacio, un administrador elimina primero los objetos del prefijo del evento desde Storage (o su API administrativa), y después el registro del evento desde SQL Editor. No borres filas directamente de `storage.objects`; usa Storage. Define el plazo de conservación con tu cliente antes de subir material real.
 - No hay todavía cuotas acumuladas por invitado/evento, moderación, escaneo de archivos, originales descargables, recuperación de favoritos entre dispositivos ni eliminación automática de usuarios anónimos. Configura protección antiabuso y presupuesto antes de abrirlo a público masivo.
-- Las portadas siguen usando fotos de ejemplo externas de Unsplash. La subida de portada propia es una ampliación pendiente; las fotos de invitados sí usan el bucket privado.
+- Las portadas nuevas pueden subirse desde el editor y se guardan en el bucket privado `event-covers`. Las portadas anteriores de muestra pueden seguir usando Unsplash. El encuadre horizontal, vertical y zoom se guarda en el evento. Las versiones sustituidas de portadas se conservan en Storage hasta su limpieza administrativa.
 
 ## Verificación y estado de entrega
 
 `pnpm test:db` ejecuta la migración real en PostgreSQL embebido (PGlite) con esquemas Auth y Storage simulados. Verifica aislamiento de fotógrafos/eventos, membresías, rutas de subida, reacciones, favoritos privados, archivo y retiro. No reemplaza las pruebas del servicio alojado, CAPTCHA ni el flujo real de Storage.
 
-La integración está preparada en código. La migración aún debe ejecutarse en tu proyecto Supabase, añadir tu usuario administrador y configurar las variables de tu cuenta. El despliegue en Vercel y la prueba entre dispositivos requieren esos pasos. No se incluyen credenciales ni se afirma que exista un despliegue remoto.
+La integración está preparada en código. En instalaciones nuevas deben ejecutarse las migraciones en orden, añadir el usuario administrador y configurar las variables de la cuenta. En instalaciones existentes se aplican solo las migraciones pendientes. El despliegue en Vercel y la prueba entre dispositivos requieren esos pasos. No se incluyen credenciales ni se afirma que exista un despliegue remoto.
 
 Referencias oficiales:
 - https://supabase.com/docs/guides/getting-started/tutorials/with-nextjs
@@ -154,3 +154,24 @@ Referencias oficiales:
 - https://supabase.com/docs/guides/storage/serving/downloads
 - https://vercel.com/docs/frameworks/full-stack/nextjs
 - https://vercel.com/docs/environment-variables
+
+## Corrección: error RLS al crear un evento
+
+Si el login funciona pero crear un evento devuelve `new row violates row-level security policy for table "events"`, aplica `supabase/migrations/202610270002_fix_event_insert_returning.sql` desde SQL Editor. No repitas la migración inicial ni desactives RLS. Esta corrección permite devolver el ID de una fila recién creada a su fotógrafo; conserva los permisos de invitados y el aislamiento entre propietarios. No requiere un despliegue de Vercel.
+
+## Actualización: invitados, Realtime, descargas y personalización
+
+Para una instalación que ya funciona, aplica **solo** `supabase/migrations/202610270003_guest_experience.sql` en Supabase SQL Editor y luego publica el código nuevo en Vercel. Si no aplicaste la corrección 002, aplícala primero. No repitas la migración 001. El SQL crea el bucket privado de portadas, campos de personalización/horarios y funciones para descargas; también añade `photos` y `events` a la publicación `supabase_realtime` si existe. En Supabase comprueba que ambas tablas estén habilitadas para Realtime. No hay variables nuevas ni necesita una clave de servidor.
+
+- **Sesión del invitado:** Supabase conserva y renueva su sesión en el navegador. El nombre se guarda por evento y UUID del usuario; al refrescar se verifica la sesión y se recupera su nombre sin volver a mostrar el formulario. El navegador debe conservar los datos del sitio y usar el mismo dominio (www y sin www son orígenes diferentes). No se traslada a otro dispositivo. Las sesiones anteriores con nombre global se migran únicamente si el usuario ya era miembro del evento.
+- **En vivo:** WebSocket de Supabase Realtime para fotos nuevas y cambios del evento, con suscripciones filtradas por evento y autorizadas por RLS. Se agrupan notificaciones cercanas y se consulta nuevamente la página visible. No se obliga al usuario a abandonar su página actual. Si la conexión falla, se intenta recuperar y hay una consulta de respaldo cada 30 segundos; también se actualiza al volver a la pestaña. No se publican favoritos privados por WebSocket. La marca de Supabase no se muestra en la vista pública.
+- **Descargas:** botón por foto y en la vista ampliada; ZIP de toda la galería o de todos los favoritos propios, incluyendo todas las páginas. Las imágenes se consultan desde Storage con la sesión del usuario. La lista de exportación usa paginación por UUID y un corte de fecha obtenido del servidor, de modo que fotos nuevas durante la preparación quedan para la próxima descarga. Los archivos se incluyen sin alterar sus bytes. Una galería grande se divide en paquetes de aproximadamente 100 MB y se muestran enlaces para guardar cada paquete. Puede cancelarse la preparación. Se recomienda preparar archivos grandes desde una computadora; los paquetes se crean en el navegador y necesitan memoria/espacio temporal. Se descargan las imágenes comprimidas existentes, no originales que nunca se almacenaron.
+- **Portada:** subir JPG/PNG/WebP, previsualizar, mover el encuadre horizontal/vertical y acercar entre 1× y 3×. Se usa la misma normalización JPEG de las fotos. La portada se guarda privada en `event-covers/USUARIO/EVENTO/ARCHIVO.jpg`; los invitados solo pueden leer la portada de su evento. No se borra automáticamente una versión reemplazada para evitar romper descargas en curso; contabilízala al limpiar Storage.
+- **Mensaje:** texto personalizado de hasta 1500 caracteres, con saltos de línea.
+- **Búsqueda:** nombre, fecha escrita o rango de fechas Desde/Hasta, combinado con el filtro de activos/archivados.
+- **Horario:** apertura opcional y cierre sin límite, en una fecha/hora determinada o 48 horas exactas después de la apertura. Los controles indican la zona horaria del dispositivo del fotógrafo y se almacenan como UTC (`timestamptz`). Los invitados ven esas horas en su propia zona.
+- **Sin cron:** PostgreSQL comprueba `now()` en cada autorización de subida a Storage y al insertar los metadatos. Fuera de horario se rechazan cargas incluso si se llama directamente a la API o si el cliente conserva un botón antiguo. La galería, favoritos y descargas siguen disponibles; para bloquear todo el acceso se archiva el evento. Los eventos anteriores conservan su comportamiento sin horarios hasta que se configuren.
+
+Validación adicional: `pnpm test:experience` comprueba identidad por evento, búsqueda, límites horarios, ZIP con todas las páginas, división de archivos y cancelación. `pnpm test:db` prueba las políticas reales con PostgreSQL embebido, incluyendo portadas privadas, descargas y bloqueo de cargas fuera de horario. Los WebSockets, CAPTCHA y Storage alojados deben verificarse después de ejecutar la migración y desplegar.
+
+Prueba de aceptación: entra desde dos navegadores al mismo evento, sube una foto en uno y confirma que aparece en el otro; recarga al invitado y comprueba que no se pide el nombre; marca favoritos y descarga su ZIP; configura un cierre cercano y confirma que se bloquean subidas mientras siguen funcionando la galería y las descargas.

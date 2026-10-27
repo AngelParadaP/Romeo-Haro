@@ -8,16 +8,22 @@ export const demoEnabled = !cloudConfigured && (process.env.NODE_ENV === "develo
 let client: SupabaseClient | undefined;
 export function supabase() {
   if (!url || !publishableKey) throw new Error("Configura las variables de Supabase para conectar la plataforma.");
-  return client ??= createClient(url, publishableKey);
+  return client ??= createClient(url, publishableKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
 }
 function check(error: { message: string } | null) { if (error) throw new Error(error.message); }
+// Reuse stored sessions, but validate the user with Auth before restoring the event.
+// A network failure must not replace an existing guest with a new anonymous identity.
+export async function existingUser() {
+  const db=supabase();
+  const stored=await db.auth.getSession();check(stored.error);
+  if(!stored.data.session)return null;
+  const verified=await db.auth.getUser();check(verified.error);
+  return verified.data.user;
+}
 export async function startSession(eventId: string | null, captchaToken?: string) {
   if (eventId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId)) throw new Error("El enlace del evento no es válido. Solicita el enlace publicado al fotógrafo.");
   const db = supabase();
-  const { data, error } = await db.auth.getUser();
-  // No session is expected on the first visit. Network failures are handled by sign-in/query.
-  if (error && data.user) check(error);
-  let user = data.user;
+  let user = await existingUser();
   if (!user && eventId) {
     const response = await db.auth.signInAnonymously({ options: { captchaToken } });
     check(response.error); user = response.data.user;
@@ -28,7 +34,7 @@ export async function startSession(eventId: string | null, captchaToken?: string
   return { userId: user.id, admin: Boolean(admin.data), events: await loadEvents(eventId) };
 }
 export async function loadEvents(eventId: string | null = null): Promise<GalleryEvent[]> {
-  let query = supabase().from("events").select("id,title,date,category,cover,active,photos(count)").is("deleted_at", null).order("created_at", { ascending: false });
+  let query = supabase().from("events").select("id,title,date,category,cover,active,description,cover_path,cover_x,cover_y,cover_zoom,uploads_open_at,uploads_close_at,photos(count)").is("deleted_at", null).order("created_at", { ascending: false });
   if (eventId) query = query.eq("id", eventId);
   else {
     const user = await supabase().auth.getUser(); check(user.error);
@@ -36,11 +42,24 @@ export async function loadEvents(eventId: string | null = null): Promise<Gallery
     query = query.eq("owner_id", user.data.user.id);
   }
   const { data, error } = await query; check(error);
-  return (data || []).map(row => ({ ...row, photos: [], photoCount: row.photos?.[0]?.count ?? 0 }));
+  return Promise.all((data || []).map(async row => {
+    let cover = row.cover;
+    if (row.cover_path) {
+      const signed = await supabase().storage.from("event-covers").createSignedUrl(row.cover_path, 900); check(signed.error);
+      if (!signed.data?.signedUrl) throw new Error("No se pudo cargar la portada del evento.");
+      cover = signed.data.signedUrl;
+    }
+    return { id: row.id, title: row.title, date: row.date, category: row.category, active: row.active, cover,
+      description: row.description, coverPath: row.cover_path, coverX: row.cover_x, coverY: row.cover_y, coverZoom: Number(row.cover_zoom),
+      uploadsOpenAt: row.uploads_open_at, uploadsCloseAt: row.uploads_close_at, photos: [], photoCount: row.photos?.[0]?.count ?? 0 };
+  }));
 }
 export async function persistEvent(event: GalleryEvent, exists: boolean) {
   const db = supabase();
-  const values = { title: event.title, date: event.date, category: event.category, cover: event.cover, active: event.active };
+  const values = { title: event.title, date: event.date, category: event.category, cover: event.coverPath ? "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=85" : event.cover, active: event.active,
+    description: event.description ?? "Un día especial. Todas las miradas. Un mismo recuerdo.", cover_path: event.coverPath || null,
+    cover_x: event.coverX ?? 50, cover_y: event.coverY ?? 50, cover_zoom: event.coverZoom ?? 1,
+    uploads_open_at: event.uploadsOpenAt || null, uploads_close_at: event.uploadsCloseAt || null };
   const query = exists ? db.from("events").update(values).eq("id", event.id) : db.from("events").insert({ ...values, id: event.id });
   const { data, error } = await query.select("id").single(); check(error);
   if (!data) throw new Error("No se pudo guardar el evento.");
@@ -60,7 +79,7 @@ export async function loadGallery(eventId: string, page: number, favorites: bool
   return { total: data.total, photos: rows.map((row, i) => {
     const result = signed.data?.[i];
     if (!result?.signedUrl || result.error) throw new Error("No se pudo autorizar una fotografía. Actualiza la galería.");
-    return { id: row.id, src: result.signedUrl, author: row.author, likeCount: row.like_count, likes: row.liked ? [userId] : [], favorites: row.favorite ? [userId] : [] };
+    return { id: row.id, storagePath: row.storage_path, src: result.signedUrl, author: row.author, likeCount: row.like_count, likes: row.liked ? [userId] : [], favorites: row.favorite ? [userId] : [] };
   }) };
 }
 export async function uploadPhoto(eventId: string, userId: string, author: string, src: string) {
@@ -78,4 +97,15 @@ export async function toggleReaction(photoId: string, field: "likes" | "favorite
   const query = supabase().from(field === "likes" ? "photo_likes" : "photo_favorites");
   const { error } = active ? await query.delete().eq("photo_id", photoId).eq("user_id", userId) : await query.upsert({ photo_id: photoId, user_id: userId }, { onConflict: "photo_id,user_id", ignoreDuplicates: true });
   check(error);
+}
+
+export async function uploadCover(eventId: string, userId: string, src: string) {
+  const path = `${userId}/${eventId}/${crypto.randomUUID()}.jpg`;
+  const blob = await (await fetch(src)).blob();
+  if (blob.size > 3 * 1024 * 1024) throw new Error("La portada comprimida supera 3 MB.");
+  const result = await supabase().storage.from("event-covers").upload(path, blob, { contentType: "image/jpeg" }); check(result.error);
+  return path;
+}
+export async function discardCover(path: string) {
+  const result = await supabase().storage.from("event-covers").remove([path]); check(result.error);
 }

@@ -1,9 +1,14 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GalleryEvent as Event, Photo } from "@/lib/types";
-import { cloudConfigured, demoEnabled, supabase, startSession, loadEvents, persistEvent, removeEvent, loadGallery, uploadPhoto, toggleReaction } from "@/lib/cloud";
+import { cloudConfigured, demoEnabled, supabase, startSession, existingUser, loadEvents, persistEvent, removeEvent, loadGallery, uploadPhoto, toggleReaction, uploadCover, discardCover } from "@/lib/cloud";
 import { Access } from "@/components/access";
+import { readPhoto } from "@/lib/media";
+import { rememberGuest, rememberedGuest, uploadStatus, matchesEvent } from "@/lib/event-utils";
+import { EventEditor, CoverImage } from "@/components/event-editor";
+import { DownloadPanel } from "@/components/download-panel";
+import { photoBlob, saveBlob } from "@/lib/downloads";
 import { ShareDialog } from "@/components/share-dialog";
 
 const images = ["photo-1519741497674-611481863552", "photo-1511795409834-ef04bbd61622", "photo-1464366400600-7168b8af9bc3"];
@@ -16,16 +21,6 @@ const initial: Event[] = [
 const key = "romeo-events-v1";
 const dateLabel = (value: string) => new Date(value + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" });
 
-async function readPhoto(file: File): Promise<string> {
-  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("Selecciona imágenes JPG, PNG o WebP.");
-  if (file.size > 12 * 1024 * 1024) throw new Error("Cada fotografía debe pesar menos de 12 MB.");
-  const bitmap = await createImageBitmap(file);
-  const canvas = document.createElement("canvas");
-  const scale = Math.min(1, 1400 / Math.max(bitmap.width, bitmap.height));
-  canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
-  return canvas.toDataURL("image/jpeg", 0.75);
-}
 
 export default function Home() {
   const [events, setEvents] = useState<Event[]>(cloudConfigured ? [] : initial);
@@ -35,6 +30,10 @@ export default function Home() {
   const [selected, setSelected] = useState<string | null>(null);
   const [publicView, setPublicView] = useState(false);
   const [query, setQuery] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateUntil, setDateUntil] = useState("");
+  const [now, setNow] = useState(0);
+  const [realtime, setRealtime] = useState("connecting");
   const [filter, setFilter] = useState("Todos");
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -51,6 +50,8 @@ export default function Home() {
   const [galleryError, setGalleryError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [shareEvent, setShareEvent] = useState<Event | null>(null);
+  const closeShare = useCallback(()=>setShareEvent(null),[]);
+  const galleryKey = useRef("");
   const upload = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -60,7 +61,19 @@ export default function Home() {
       setSelected(id); setPublicView(!!id); setPage(1); setReady(false); setInitError("");
       try {
         if (cloudConfigured) {
-          if (id) { setGuestEntry(true); return; }
+          if (id) {
+            const existing = await existingUser();
+            let savedName = existing ? rememberedGuest(id, existing.id) : "";
+            // Migrate the previous global display name only for an existing membership.
+            if(!savedName && existing){
+              let legacy="";try{legacy=localStorage.getItem("romeo-guest-name")?.trim()||"";}catch{}
+              if(legacy){const membership=await supabase().from("event_guests").select("event_id").eq("event_id",id).eq("user_id",existing.id).maybeSingle();if(membership.data){savedName=legacy;rememberGuest(id,existing.id,legacy);}}
+            }
+            if (!savedName) { if (alive) setGuestEntry(true); return; }
+            const session = await startSession(id);
+            if (!alive) return;
+            setName(savedName);setAdmin(session.admin);setGuestId(session.userId);setEvents(session.events);setGuestEntry(false);setReady(true);return;
+          }
           const session = await startSession(null);
           if (!alive) return;
           setAdmin(session.admin); setGuestId(session.userId); setEvents(session.events);
@@ -78,11 +91,34 @@ export default function Home() {
     void route(); window.addEventListener("popstate", route);
     return () => { alive = false; window.removeEventListener("popstate", route); };
   }, []);
+  useEffect(() => { setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),30000);return()=>clearInterval(timer); }, []);
+  useEffect(() => {
+    if (!cloudConfigured || !ready || !selected) return;
+    let disposed=false;let debounce: ReturnType<typeof setTimeout> | undefined;
+    const changed=()=>{
+      clearTimeout(debounce);debounce=setTimeout(()=>{
+        if(disposed)return;
+        setRefresh(value=>value+1);
+        void loadEvents(selected).then(result=>{if(!disposed)setEvents(old=>publicView?result:result.length?old.map(event=>event.id===selected?result[0]:event):old.filter(event=>event.id!==selected));}).catch(()=>{});
+      },350);
+    };
+    setRealtime("connecting");
+    const channel=supabase().channel(`event-${selected}`)
+      .on('postgres_changes',{event:'INSERT',schema:'public',table:'photos',filter:`event_id=eq.${selected}`},changed)
+      .on('postgres_changes',{event:'UPDATE',schema:'public',table:'events',filter:`id=eq.${selected}`},changed)
+      .subscribe(status=>{if(disposed)return;setRealtime(status==='SUBSCRIBED'?'live':'reconnecting');if(status==='SUBSCRIBED')changed();});
+    const wake=()=>{if(document.visibilityState==='visible')changed();};window.addEventListener('online',changed);document.addEventListener('visibilitychange',wake);
+    // Fallback if a network blocks WebSockets; also discovers event archival/deletion.
+    const poll=setInterval(changed,30000);
+    return()=>{disposed=true;clearTimeout(debounce);clearInterval(poll);void supabase().removeChannel(channel);window.removeEventListener('online',changed);document.removeEventListener('visibilitychange',wake);};
+  },[selected,ready,publicView]);
   useEffect(() => {
     if (!cloudConfigured || !ready || !selected) return;
     let alive = true;
+    const key=`${selected}-${page}-${favoriteOnly}`;
+    const showLoading=galleryKey.current!==key;galleryKey.current=key;
     const fetchPage = async () => {
-      setGalleryLoading(true); setGalleryError("");
+      if(showLoading)setGalleryLoading(true); setGalleryError("");
       try { const result = await loadGallery(selected, page, favoriteOnly, guestId); if (alive) setGallery(result); }
       catch (err) { if (alive) { setGallery({ photos: [], total: 0 }); setGalleryError(err instanceof Error ? err.message : "No se pudo cargar la galería."); } }
       finally { if (alive) setGalleryLoading(false); }
@@ -112,6 +148,7 @@ export default function Home() {
   function share(event: Event) { setShareEvent(event); }
   async function addPhotos(files: FileList | null) {
     if (!files || !current || busy) return;
+    if (uploadStatus(current) !== "open") { setToast("La carga de fotografías no está abierta en este momento."); return; }
     if (!name.trim()) { setToast("Escribe tu nombre antes de subir tus fotos."); return; }
     if (files.length > 10) { setToast("Sube hasta 10 fotografías a la vez."); return; }
     setBusy(true);
@@ -142,7 +179,11 @@ export default function Home() {
     const values = photo[field].includes(guestId) ? photo[field].filter(id => id !== guestId) : [...photo[field], guestId];
     update({ ...current, photos: current.photos.map(p => p.id === photo.id ? { ...p, [field]: values } : p) });
   }
-  const visible = events.filter(e => e.title.toLowerCase().includes(query.toLowerCase()) && (filter === "Todos" || (filter === "Activos" ? e.active : !e.active)));
+  async function downloadOne(photo:Photo){
+    try{setToast("Preparando fotografía…");saveBlob(await photoBlob(photo),`foto-${photo.id}.jpg`);setToast("Fotografía lista para descargar.");}
+    catch(err){setToast(err instanceof Error?err.message:"No se pudo descargar la fotografía.");}
+  }
+  const visible = events.filter(e => matchesEvent(e, query, dateFrom, dateUntil) && (filter === "Todos" || (filter === "Activos" ? e.active : !e.active)));
   const localPhotos = current?.photos.filter(p => !favoriteOnly || p.favorites.includes(guestId)) || [];
   const photos = cloudConfigured ? gallery.photos : localPhotos;
   const photoTotal = cloudConfigured ? gallery.total : photos.length;
@@ -151,7 +192,7 @@ export default function Home() {
   if (cloudConfigured && guestEntry) return <Access guest onGuest={async (guestName, captcha) => {
     const session = await startSession(selected, captcha || undefined);
     setGuestId(session.userId); setAdmin(session.admin); setEvents(session.events); setName(guestName);
-    try { localStorage.setItem("romeo-guest-name", guestName); } catch {}
+    if(selected)rememberGuest(selected,session.userId,guestName);
     setGuestEntry(false); setReady(true);
   }} />;
   if (cloudConfigured && initError) return <div className="access-shell"><section className="access-card"><h1>No pudimos conectar</h1><p role="alert">{initError}</p><button className="primary" onClick={() => location.reload()}>Reintentar</button></section></div>;
@@ -162,28 +203,40 @@ export default function Home() {
   return <div className="app-shell">
     {!publicView && <aside className="sidebar"><a className="brand" href="/">r<span>h</span><i>✳</i></a><div className="studio">ROMEO HARO<span>ESTUDIO FOTOGRÁFICO</span></div><div className="nav-label">TU ESPACIO</div><button className={!selected ? "nav-item active" : "nav-item"} onClick={() => setSelected(null)}><span>▦</span> Mis eventos <small>{events.length}</small></button><div className="sidebar-note"><span>✧</span><p>Los mejores recuerdos<br />se construyen juntos.</p><small>Crea. Comparte. Revive.</small></div><div className="profile"><b>RH</b><div>Romeo Haro<small>{cloudConfigured ? "Fotógrafo · Conectado" : "Fotógrafo · Demo local"}</small></div><span>⌄</span></div></aside>}
     <div className={publicView ? "workspace public" : "workspace"}>
-      <header><span>{publicView ? "ROMEO HARO / RECUERDOS COMPARTIDOS" : "Mi estudio"}{!publicView && <span className="breadcrumb"> / {current ? current.title : "Mis eventos"}</span>}</span><div><span className="local-pill"><i /> {cloudConfigured ? "Supabase conectado" : "Demo local"}</span><span className="avatar">RH</span>{cloudConfigured && !publicView && <button className="logout" onClick={async () => { const result = await supabase().auth.signOut(); if (result.error) setToast(result.error.message); else location.reload(); }}>Salir</button>}</div></header>
+      <header><span>{publicView ? "ROMEO HARO / RECUERDOS COMPARTIDOS" : "Mi estudio"}{!publicView && <span className="breadcrumb"> / {current ? current.title : "Mis eventos"}</span>}</span><div>{!publicView && <span className="local-pill"><i /> {cloudConfigured ? "Estudio conectado" : "Demo local"}</span>}<span className="avatar">RH</span>{cloudConfigured && !publicView && <button className="logout" onClick={async () => { const result = await supabase().auth.signOut(); if (result.error) setToast(result.error.message); else location.reload(); }}>Salir</button>}</div></header>
       <main>
       {publicView && (!current || !current.active) ? <section className="empty"><h1>Este evento no está disponible</h1><p>Puede estar archivado, eliminado o no estar disponible.</p>{!cloudConfigured && <p>Esta versión de prueba no sincroniza eventos entre dispositivos.</p>}</section> : current ? <>
         {!publicView && <button className="back" onClick={() => setSelected(null)}>← Volver a mis eventos</button>}
-        <section className="event-hero" style={{ backgroundImage: `linear-gradient(0deg,rgba(23,29,24,.8),rgba(23,29,24,.08)),url("${current.cover}")` }}><span className="eyebrow">{current.category} · {dateLabel(current.date)}</span><h1>{current.title}</h1><p>Un día especial. Todas las miradas. Un mismo recuerdo.</p>{!publicView && <button className="light-button" onClick={() => share(current)}>▦ Compartir y QR</button>}</section>
-        <section className="upload-panel"><div><span className="eyebrow">CADA MIRADA CUENTA</span><h2>Comparte tu parte de la historia.</h2><p>Las fotos que subas serán visibles para quienes accedan al evento.</p></div><div className="upload-actions"><input aria-label="Tu nombre" placeholder="¿Cómo te llamas?" maxLength={60} value={name} onChange={e => { setName(e.target.value); try { localStorage.setItem("romeo-guest-name", e.target.value); } catch {} }} /><div><button className="primary" disabled={busy || !current.active} onClick={() => upload.current?.click()}>↑ {busy ? "Subiendo…" : "Subir fotos"}</button><button className="secondary" disabled={busy || !current.active} onClick={() => camera.current?.click()}>◎ Tomar foto</button></div><input ref={upload} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={e => addPhotos(e.target.files)} /><input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={e => addPhotos(e.target.files)} /></div></section>
-        <div className="gallery-toolbar"><h2>Los recuerdos <span>{current.photoCount ?? current.photos.length}</span></h2><div className="tabs"><button className={!favoriteOnly ? "chosen" : ""} onClick={() => { setFavoriteOnly(false); setPage(1); }}>Todas las fotos</button><button className={favoriteOnly ? "chosen" : ""} onClick={() => { setFavoriteOnly(true); setPage(1); }}>♡ Mis favoritos</button>{cloudConfigured && <button disabled={galleryLoading} onClick={() => setRefresh(value => value + 1)}>↻ Actualizar</button>}</div></div>
-        {cloudConfigured && (galleryLoading || galleryError) ? <section className="empty"><p role={galleryError ? "alert" : "status"}>{galleryError || "Cargando recuerdos…"}</p>{galleryError && <button className="secondary" onClick={() => setRefresh(value => value + 1)}>Reintentar</button>}</section> : photos.length ? <div className="photo-grid">{shownPhotos.map(photo => <article className="photo-card" key={photo.id}><button className="photo-open" onClick={() => setLightbox(photo)}><img src={photo.src} alt={`Recuerdo de ${photo.author}`} /></button><div><span>{photo.author}</span><button aria-label="Me gusta" aria-pressed={photo.likes.includes(guestId)} onClick={() => react(photo, "likes")}>{photo.likes.includes(guestId) ? "♥" : "♡"} {photo.likeCount ?? photo.likes.length}</button><button aria-label="Guardar favorito" aria-pressed={photo.favorites.includes(guestId)} onClick={() => react(photo, "favorites")}>{photo.favorites.includes(guestId) ? "★" : "☆"}</button></div></article>)}</div> : <section className="empty"><span>▧</span><h2>{favoriteOnly ? "Tus favoritos vivirán aquí" : "La primera foto inicia la historia"}</h2><p>{favoriteOnly ? "Marca una fotografía con la estrella para guardarla." : "Sube un recuerdo y dale vida a esta galería."}</p></section>}
+        <section className="event-hero" ><div className="event-picture"><CoverImage event={current} /></div><span className="eyebrow">{current.category} · {dateLabel(current.date)}</span><h1>{current.title}</h1><p className="event-description">{current.description ?? "Un día especial. Todas las miradas. Un mismo recuerdo."}</p>{!publicView && <button className="light-button" onClick={() => share(current)}>▦ Compartir y QR</button>}</section>
+        <section className="upload-panel"><div><span className="eyebrow">CADA MIRADA CUENTA</span><h2>Comparte tu parte de la historia.</h2><p>Las fotos que subas serán visibles para quienes accedan al evento.</p><p className="upload-schedule">{uploadStatus(current,now)==='closed'?'La carga de fotos está cerrada. Puedes seguir viendo y descargando recuerdos.':uploadStatus(current,now)==='scheduled'?`Las subidas abren el ${new Date(current.uploadsOpenAt!).toLocaleString('es-MX')}`:current.uploadsCloseAt?`Puedes subir fotos hasta el ${new Date(current.uploadsCloseAt).toLocaleString('es-MX')}`:'La carga de fotos está abierta.'}</p></div><div className="upload-actions"><input aria-label="Tu nombre" placeholder="¿Cómo te llamas?" maxLength={60} value={name} onChange={e => { setName(e.target.value); if(cloudConfigured)rememberGuest(current.id,guestId,e.target.value);else try { localStorage.setItem("romeo-guest-name", e.target.value); } catch {} }} /><div><button className="primary" disabled={busy || uploadStatus(current,now)!=="open"} onClick={() => upload.current?.click()}>↑ {busy ? "Subiendo…" : "Subir fotos"}</button><button className="secondary" disabled={busy || uploadStatus(current,now)!=="open"} onClick={() => camera.current?.click()}>◎ Tomar foto</button></div><input ref={upload} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={e => addPhotos(e.target.files)} /><input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={e => addPhotos(e.target.files)} /></div></section>
+        <div className="gallery-toolbar"><h2>Los recuerdos <span>{current.photoCount ?? current.photos.length}</span></h2><div className="tabs"><button className={!favoriteOnly ? "chosen" : ""} onClick={() => { setFavoriteOnly(false); setPage(1); }}>Todas las fotos</button><button className={favoriteOnly ? "chosen" : ""} onClick={() => { setFavoriteOnly(true); setPage(1); }}>♡ Mis favoritos</button>{cloudConfigured && <button disabled={galleryLoading} onClick={() => setRefresh(value => value + 1)}>↻ Actualizar</button>}{cloudConfigured&&<small className="live-state" role="status">{realtime==="live"?"● En vivo":"Reconectando…"}</small>}</div></div><DownloadPanel key={`${current.id}-${favoriteOnly}`} eventId={current.id} favorites={favoriteOnly} localPhotos={localPhotos} />
+        {cloudConfigured && (galleryLoading || galleryError) ? <section className="empty"><p role={galleryError ? "alert" : "status"}>{galleryError || "Cargando recuerdos…"}</p>{galleryError && <button className="secondary" onClick={() => setRefresh(value => value + 1)}>Reintentar</button>}</section> : photos.length ? <div className="photo-grid">{shownPhotos.map(photo => <article className="photo-card" key={photo.id}><button className="photo-open" onClick={() => setLightbox(photo)}><img src={photo.src} alt={`Recuerdo de ${photo.author}`} /></button><div><span>{photo.author}</span><button disabled={busy} aria-label="Me gusta" aria-pressed={photo.likes.includes(guestId)} onClick={() => react(photo, "likes")}>{photo.likes.includes(guestId) ? "♥" : "♡"} {photo.likeCount ?? photo.likes.length}</button><button disabled={busy} aria-label="Guardar favorito" aria-pressed={photo.favorites.includes(guestId)} onClick={() => react(photo, "favorites")}>{photo.favorites.includes(guestId) ? "★" : "☆"}</button><button aria-label={`Descargar foto de ${photo.author}`} onClick={()=>downloadOne(photo)}>↓</button></div></article>)}</div> : <section className="empty"><span>▧</span><h2>{favoriteOnly ? "Tus favoritos vivirán aquí" : "La primera foto inicia la historia"}</h2><p>{favoriteOnly ? "Marca una fotografía con la estrella para guardarla." : "Sube un recuerdo y dale vida a esta galería."}</p></section>}
         {photoTotal > 12 && <div className="pagination"><button disabled={page === 1} onClick={() => setPage(page - 1)}>← Anterior</button><span>{page} / {Math.ceil(photoTotal / 12)}</span><button disabled={page * 12 >= photoTotal} onClick={() => setPage(page + 1)}>Siguiente →</button></div>}
       </> : <>
         <div className="page-heading"><div><span className="eyebrow">RECUERDOS QUE SE QUEDAN</span><h1>Mis eventos<span>.</span></h1><p>Cada celebración, una historia contada entre todos.</p></div><button className="primary" disabled={!ready} onClick={() => { setEditing(null); setModal(true); }}>＋ Crear evento</button></div>
         <section className="welcome"><div><span className="eyebrow">DETRÁS DE CADA FOTO, UNA HISTORIA</span><h2>Tú creas el momento.<br /><em>Ellos suman su mirada.</em></h2><p>Un espacio para reunir las fotos de todos tus invitados.<br />Crea un evento y deja que los recuerdos lleguen.</p><button onClick={() => { setEditing(null); setModal(true); }}>Comienza una nueva historia <span>↗</span></button></div><div className="welcome-image"><img src={pic(0)} alt="Celebración de una boda al aire libre" /><div className="image-caption">momentos que merecen quedarse <span>✧</span></div></div></section>
         <section className="stats"><div><span>▦</span><p>Total de eventos<b>{events.length.toString().padStart(2, "0")}</b></p></div><div><span>◉</span><p>Eventos activos<b>{events.filter(e => e.active).length.toString().padStart(2, "0")}</b></p></div><div><span>▧</span><p>Fotografías compartidas<b>{events.reduce((n, e) => n + (e.photoCount ?? e.photos.length), 0).toString().padStart(2, "0")}</b></p></div></section>
-        <div className="section-heading"><h2>Tus historias <span>{events.length}</span></h2><label className="search">⌕ <input placeholder="Buscar un evento…" aria-label="Buscar un evento" value={query} onChange={e => setQuery(e.target.value)} /></label></div><div className="list-toolbar"><div className="tabs">{["Todos", "Activos", "Archivados"].map(f => <button className={filter === f ? "chosen" : ""} key={f} onClick={() => setFilter(f)}>{f}</button>)}</div><span>Ordenados por creación</span></div>
-        <div className="event-grid">{visible.map(event => <article className="event-card" key={event.id}><button className="event-cover" onClick={() => openEvent(event.id)}><img src={event.cover} alt={event.title} /><span className={event.active ? "status" : "status archived"}><i />{event.active ? "Activo" : "Archivado"}</span><span className="cover-arrow">↗</span></button><div className="event-info"><span className="eyebrow">{event.category}</span><button className="event-title" onClick={() => openEvent(event.id)}>{event.title}</button><p>◷ {dateLabel(event.date)}</p><div className="card-bottom"><span>▧ {event.photoCount ?? event.photos.length} fotografías</span><button aria-label={`Compartir enlace y QR de ${event.title}`} onClick={() => share(event)}>↗</button><button aria-label={`Editar ${event.title}`} onClick={() => { setEditing(event.id); setModal(true); }}>✎</button></div></div></article>)}</div>{!visible.length && <div className="empty"><h2>No hay eventos para mostrar</h2><p>Prueba otra búsqueda o crea una nueva historia.</p></div>}
+        <div className="section-heading"><h2>Tus historias <span>{events.length}</span></h2><label className="search">⌕ <input placeholder="Buscar por nombre o fecha…" aria-label="Buscar un evento" value={query} onChange={e => setQuery(e.target.value)} /></label></div><div className="date-filters"><label>Desde<input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} /></label><label>Hasta<input type="date" value={dateUntil} min={dateFrom} onChange={e=>setDateUntil(e.target.value)} /></label>{(dateFrom||dateUntil)&&<button onClick={()=>{setDateFrom("");setDateUntil("");}}>Limpiar fechas ×</button>}</div><div className="list-toolbar"><div className="tabs">{["Todos", "Activos", "Archivados"].map(f => <button className={filter === f ? "chosen" : ""} key={f} onClick={() => setFilter(f)}>{f}</button>)}</div><span>Ordenados por creación</span></div>
+        <div className="event-grid">{visible.map(event => <article className="event-card" key={event.id}><button className="event-cover" onClick={() => openEvent(event.id)}><CoverImage event={event} /><span className={event.active ? "status" : "status archived"}><i />{event.active ? "Activo" : "Archivado"}</span><span className="cover-arrow">↗</span></button><div className="event-info"><span className="eyebrow">{event.category}</span><button className="event-title" onClick={() => openEvent(event.id)}>{event.title}</button><p>◷ {dateLabel(event.date)}</p><div className="card-bottom"><span>▧ {event.photoCount ?? event.photos.length} fotografías</span><button aria-label={`Compartir enlace y QR de ${event.title}`} onClick={() => share(event)}>↗</button><button aria-label={`Editar ${event.title}`} onClick={() => { setEditing(event.id); setModal(true); }}>✎</button></div></div></article>)}</div>{!visible.length && <div className="empty"><h2>No hay eventos para mostrar</h2><p>Prueba otra búsqueda o crea una nueva historia.</p></div>}
       </>}
-      <footer><span>ROMEO HARO <i>✳</i></span><p>Hecho para vivirlo. Creado para recordarlo.</p><small>{cloudConfigured ? "Galería compartida · Sesión protegida por Supabase" : "Prototipo · Datos guardados en este navegador"}</small></footer>
+      <footer><span>ROMEO HARO <i>✳</i></span><p>Hecho para vivirlo. Creado para recordarlo.</p><small>{publicView ? "Recuerdos compartidos" : cloudConfigured ? "Galería compartida" : "Prototipo · Datos guardados en este navegador"}</small></footer>
       </main>
     </div>
-    {shareEvent && <ShareDialog id={shareEvent.id} title={shareEvent.title} local={!cloudConfigured} onClose={() => setShareEvent(null)} />}
-    {modal && <div className="overlay" onClick={() => setModal(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={e => e.stopPropagation()}><button className="close" aria-label="Cerrar" onClick={() => setModal(false)}>×</button><span className="eyebrow">UNA NUEVA HISTORIA</span><h2 id="modal-title">{editing ? "Editar evento" : "Crea un momento inolvidable."}</h2><form key={editing || "new"} onSubmit={async e => { e.preventDefault(); if (busy) return; setBusy(true); const data = new FormData(e.currentTarget); const old = events.find(v => v.id === editing); const event: Event = { id: old?.id || crypto.randomUUID(), title: String(data.get("title")).trim(), date: String(data.get("date")), category: String(data.get("category")), cover: old?.cover || pic(events.length), active: data.get("active") === "on", photos: old?.photos || [], photoCount: old?.photoCount }; if (!event.title) { setBusy(false); return; } if (await save(old ? events.map(v => v.id === old.id ? event : v) : [event, ...events])) { setModal(false); setToast(old ? "Evento actualizado." : "Tu nueva historia está lista."); } setBusy(false); }}><label>Nombre del evento<input name="title" required maxLength={100} defaultValue={events.find(e => e.id === editing)?.title} placeholder="Ej. La boda de Ana & Carlos" autoFocus /></label><label>Fecha<input name="date" type="date" required defaultValue={events.find(e => e.id === editing)?.date} /></label><label>Tipo de evento<select name="category" defaultValue={events.find(e => e.id === editing)?.category || "Boda"}><option>Boda</option><option>Cumpleaños</option><option>Celebración</option><option>Encuentro</option></select></label><label className="checkbox"><input type="checkbox" name="active" defaultChecked={events.find(e => e.id === editing)?.active ?? true} /> Evento activo · permitir subir fotografías</label><button className="primary" type="submit" disabled={busy}>{editing ? "Guardar cambios" : "Crear evento"} ↗</button>{editing && <button className="danger" type="button" onClick={async () => { if (busy) return; if (confirm(cloudConfigured ? "¿Retirar este evento? Dejará de ser accesible para invitados. Los archivos se conservan hasta su limpieza en Storage." : "¿Eliminar este evento y todas sus fotos?")) { setBusy(true); if (await save(events.filter(e => e.id !== editing))) { setModal(false); setSelected(null); } setBusy(false); } }}>{cloudConfigured ? "Retirar evento" : "Eliminar evento y sus fotos"}</button>}</form></section></div>}
-    {lightbox && <div className="overlay lightbox" role="dialog" aria-label="Fotografía ampliada" onClick={() => setLightbox(null)}><button className="close" aria-label="Cerrar fotografía" onClick={() => setLightbox(null)}>×</button><img src={lightbox.src} alt={`Fotografía de ${lightbox.author}`} /></div>}
+    {shareEvent && <ShareDialog id={shareEvent.id} title={shareEvent.title} local={!cloudConfigured} onClose={closeShare} />}
+    {modal && <EventEditor event={events.find(event=>event.id===editing)} defaultCover={pic(events.length)} onClose={()=>setModal(false)} onSave={async(event,newCover)=>{
+      let path: string|undefined;
+      try{
+        if(cloudConfigured&&newCover){path=await uploadCover(event.id,guestId,event.cover);event={...event,coverPath:path};}
+        const old=events.find(item=>item.id===event.id);
+        const saved=await save(old?events.map(item=>item.id===event.id?event:item):[event,...events]);
+        if(!saved){if(path)await discardCover(path);return false;}
+        setToast(old?'Evento actualizado.':'Tu nueva historia está lista.');return true;
+      }catch(err){if(path)await discardCover(path).catch(()=>{});throw err;}
+    }} onDelete={editing?async()=>{
+      if(!confirm(cloudConfigured?'¿Retirar este evento? Los archivos se conservan hasta su limpieza en Storage.':'¿Eliminar el evento y sus fotos?'))return;
+      if(await save(events.filter(event=>event.id!==editing))){setModal(false);setSelected(null);}
+    }:undefined} />}
+    {lightbox && <div className="overlay lightbox" role="dialog" aria-label="Fotografía ampliada" onClick={() => setLightbox(null)}><button className="close" aria-label="Cerrar fotografía" onClick={() => setLightbox(null)}>×</button><img src={lightbox.src} alt={`Fotografía de ${lightbox.author}`} /><button className="lightbox-download secondary" onClick={e=>{e.stopPropagation();void downloadOne(lightbox);}}>↓ Descargar fotografía</button></div>}
     {toast && <div className="toast" role="status">{toast}<button aria-label="Cerrar aviso" onClick={() => setToast("")}>×</button></div>}
   </div>;
 }

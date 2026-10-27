@@ -10,11 +10,13 @@
     "typecheck": "tsc --noEmit",
     "test:db": "node scripts/test-database.mjs",
     "check:env": "node scripts/check-env.mjs",
-    "prebuild": "node scripts/check-env.mjs --build"
+    "prebuild": "node scripts/check-env.mjs --build",
+    "test:experience": "node scripts/test-experience.mjs"
   },
   "dependencies": {
     "@supabase/server": "^1.9.2",
     "@supabase/supabase-js": "^2.118.0",
+    "fflate": "^0.8.3",
     "next": "16.4.3",
     "qrcode": "^1.5.4",
     "react": "19.3.0",

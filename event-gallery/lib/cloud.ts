@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { GalleryEvent, Photo, StudioContact } from "./types";
+import {mapsLink} from "./maps";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -118,6 +119,7 @@ export async function loadStudio(eventId?: string):Promise<StudioContact|null>{
   const result=await supabase().from('studio_profiles').select('name,email,whatsapp,address').eq('owner_id',user.id).maybeSingle();check(result.error);return result.data;
 }
 export async function saveStudio(contact:StudioContact){
+  if(contact.address.trim()&&!mapsLink(contact.address))throw new Error("Pega un enlace HTTPS de Google Maps para la ubicación del estudio.");
   const user=await existingUser();if(!user)throw new Error('Inicia sesión para guardar el contacto.');
   // Preserve ownership. Do not UPDATE owner_id via an upsert.
   const existing=await supabase().from('studio_profiles').select('owner_id').eq('owner_id',user.id).maybeSingle();check(existing.error);

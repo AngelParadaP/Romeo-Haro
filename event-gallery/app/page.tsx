@@ -13,7 +13,7 @@ import {Icon} from "@/components/icon";
 import {ContactDialog} from "@/components/contact-dialog";
 import {FileSaveDialog} from "@/components/file-save-dialog";
 import {EventCalendar} from "@/components/event-calendar";
-import {useGoogleDrive} from "@/lib/drive-client";
+import {uploadProvider} from "@/lib/storage-client";
 import {StorageDialog} from "@/components/storage-dialog";
 import { ShareDialog } from "@/components/share-dialog";
 
@@ -248,7 +248,7 @@ export default function Home() {
     {modal && <EventEditor event={events.find(event=>event.id===editing)} defaultCover={pic(events.length)} defaultCategory={category==='all'?'Boda':category} onClose={()=>setModal(false)} onSave={async(event,newCover)=>{
       let path: string|undefined;
       try{
-        if(cloudConfigured&&newCover){path=await uploadCover(event.id,guestId,event.cover);event={...event,coverPath:path,coverProvider:useGoogleDrive?"google-drive":"supabase"};}
+        if(cloudConfigured&&newCover){path=await uploadCover(event.id,guestId,event.cover);event={...event,coverPath:path,coverProvider:uploadProvider};}
         const old=events.find(item=>item.id===event.id);
         const saved=await save(old?events.map(item=>item.id===event.id?event:item):[event,...events]);
         if(!saved){if(path)await discardCover(path);return false;}

@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { GalleryEvent, Photo, StudioContact, StorageProvider } from "./types";
-import {driveURLs,driveUpload,useGoogleDrive,storageRequest} from "./drive-client";
+import {driveURLs,driveUpload,uploadProvider,storageRequest} from "./storage-client";
 import {mapsLink} from "./maps";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -46,8 +46,8 @@ export async function loadEvents(eventId: string | null = null): Promise<Gallery
   const { data, error } = await query; check(error);
   return Promise.all((data || []).map(async row => {
     let cover = row.cover;
-    if (row.cover_path&&row.cover_provider==='google-drive') {
-      [cover]=await driveURLs('event-covers',[row.cover_path]);
+    if (row.cover_path&&['google-drive','r2'].includes(row.cover_provider)) {
+      [cover]=await driveURLs('event-covers',[row.cover_path],row.cover_provider);
     } else if (row.cover_path) {
       const signed = await supabase().storage.from("event-covers").createSignedUrl(row.cover_path, 900); check(signed.error);
       if (!signed.data?.signedUrl) throw new Error("No se pudo cargar la portada del evento.");
@@ -81,19 +81,19 @@ export async function loadGallery(eventId: string, page: number, favorites: bool
   const { data, error } = await db.rpc("gallery_page", { event_token: eventId, page_number: page, only_favorites: favorites }); check(error);
   const rows = data.items as PhotoRow[];
   if (!rows.length) return { photos: [], total: data.total };
-  const legacy=rows.filter(row=>row.storage_provider!=='google-drive');
+  const legacy=rows.filter(row=>!['google-drive','r2'].includes(row.storage_provider));
   const signed=legacy.length?await db.storage.from("event-photos").createSignedUrls(legacy.map(row=>row.storage_path),900):null;
   if(signed)check(signed.error);
   const urls=new Map<string,string>();
   legacy.forEach((row,i)=>{const result=signed?.data?.[i];if(!result?.signedUrl||result.error)throw new Error("No se pudo autorizar una fotografía.");urls.set(row.storage_path,result.signedUrl);});
-  const drive=rows.filter(row=>row.storage_provider==='google-drive');const driveLinks=await driveURLs('event-photos',drive.map(row=>row.storage_path));drive.forEach((row,i)=>urls.set(row.storage_path,driveLinks[i]));
+  for(const provider of ['google-drive','r2']){const external=rows.filter(row=>row.storage_provider===provider);const links=await driveURLs('event-photos',external.map(row=>row.storage_path),provider);external.forEach((row,i)=>urls.set(row.storage_path,links[i]));}
   return {total:data.total,photos:rows.map(row=>({id:row.id,storagePath:row.storage_path,storageProvider:row.storage_provider,src:urls.get(row.storage_path)!,author:row.author,likeCount:row.like_count,likes:row.liked?[userId]:[],favorites:row.favorite?[userId]:[]}))};
 }
 export async function uploadPhoto(eventId: string, userId: string, author: string, src: string) {
   const db = supabase(); const id = crypto.randomUUID(); const path = `${eventId}/${userId}/${id}.jpg`;
   const blob = await (await fetch(src)).blob();
   if (blob.size > 3 * 1024 * 1024) throw new Error("La imagen comprimida supera 3 MB.");
-  if(useGoogleDrive){await driveUpload('event-photos',eventId,blob,author);return;}
+  if(uploadProvider!=="supabase"){await driveUpload('event-photos',eventId,blob,author);return;}
   const uploaded = await db.storage.from("event-photos").upload(path, blob, { contentType: "image/jpeg", upsert: false }); check(uploaded.error);
   const inserted = await db.from("photos").insert({ id, event_id: eventId, author_id: userId, author, storage_path: path });
   if (inserted.error) {
@@ -111,12 +111,12 @@ export async function uploadCover(eventId: string, userId: string, src: string) 
   const path = `${userId}/${eventId}/${crypto.randomUUID()}.jpg`;
   const blob = await (await fetch(src)).blob();
   if (blob.size > 3 * 1024 * 1024) throw new Error("La portada comprimida supera 3 MB.");
-  if(useGoogleDrive)return (await driveUpload('event-covers',eventId,blob)).path;
+  if(uploadProvider!=="supabase")return (await driveUpload('event-covers',eventId,blob)).path;
   const result = await supabase().storage.from("event-covers").upload(path, blob, { contentType: "image/jpeg" }); check(result.error);
   return path;
 }
 export async function discardCover(path: string) {
-  if(useGoogleDrive){await storageRequest("/api/storage/file",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({path})});return;}
+  if(uploadProvider!=="supabase"){await storageRequest("/api/storage/file",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({path,provider:uploadProvider})});return;}
   const result = await supabase().storage.from("event-covers").remove([path]); check(result.error);
 }
 

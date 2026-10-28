@@ -46,7 +46,7 @@ Usa Node.js **22 o superior** en local y Vercel. Mantén las variables actuales 
 
 | Variable | Valor |
 | --- | --- |
-| `NEXT_PUBLIC_STORAGE_PROVIDER` | `google-drive` |
+| `NEXT_PUBLIC_STORAGE_PROVIDER` | `googl`e-drive |
 | `SUPABASE_SERVICE_ROLE_KEY` | Clave secret/service_role de Supabase, solo servidor |
 | `APP_URL` | `https://romeoharofotografia.org` o el origen canónico que realmente uses |
 | `GOOGLE_DRIVE_OWNER_ID` | UUID del fotógrafo en Supabase Auth |

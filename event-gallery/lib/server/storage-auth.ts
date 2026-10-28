@@ -3,6 +3,7 @@ import {createClient} from '@supabase/supabase-js';
 import {createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
 import {NextResponse} from 'next/server';
 export class StorageError extends Error { constructor(message:string,public status=400){super(message);} }
+export const r2Enabled=()=>process.env.NEXT_PUBLIC_STORAGE_PROVIDER==='r2';
 export const driveEnabled=()=>process.env.NEXT_PUBLIC_STORAGE_PROVIDER==='google-drive';
 export function setting(name:string){const value=process.env[name];if(!value)throw new StorageError('Falta configurar el almacenamiento en el servidor.',503);return value;}
 function encryptionKey(){const value=Buffer.from(setting('DRIVE_ENCRYPTION_KEY'),'base64');if(value.length!==32)throw new StorageError('La clave de cifrado del almacenamiento no es válida.',503);return value;}
@@ -19,6 +20,12 @@ export async function authenticated(request:Request){
 }
 export async function requireDriveOwner(request:Request){const session=await authenticated(request);const admin=await session.db.rpc('is_admin');if(admin.error||!admin.data||session.user.id!==setting('GOOGLE_DRIVE_OWNER_ID'))throw new StorageError('Solo el fotógrafo configurado puede conectar esta cuenta de Drive.',403);return session;}
 export function privateJSON(data:unknown,token?:string){const response=NextResponse.json(data,{headers:{'Cache-Control':'private, no-store'}});if(token)response.cookies.set('rh_storage',seal({token,exp:Date.now()+3600000}),{httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'lax',path:'/api/storage',maxAge:3600});return response;}
-export function fail(error:unknown){return NextResponse.json({error:error instanceof StorageError?error.message:'No se pudo completar la operación de almacenamiento. Revisa la conexión de Drive e inténtalo de nuevo.'},{status:error instanceof StorageError?error.status:502,headers:{'Cache-Control':'no-store'}});}
+export function fail(error:unknown){return NextResponse.json({error:error instanceof StorageError?error.message:'No se pudo completar la operación de almacenamiento. Revisa la configuración del almacenamiento e inténtalo de nuevo.'},{status:error instanceof StorageError?error.status:502,headers:{'Cache-Control':'no-store'}});}
 export const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function allowed(db:Awaited<ReturnType<typeof authenticated>>['db'],path:string,bucket:string,writing=false){const result=await db.rpc('drive_access',{target:path,kind:bucket,writing});if(result.error||!result.data)throw new StorageError('No tienes permiso para este archivo o el plazo del evento terminó.',403);}
+
+export async function allowedStorage(db:Awaited<ReturnType<typeof authenticated>>['db'],path:string,bucket:string,provider:string,writing=false){
+ if(provider==='google-drive')return allowed(db,path,bucket,writing);
+ const result=await db.rpc('storage_access',{target:path,kind:bucket,provider,writing});if(result.error||!result.data)throw new StorageError('No tienes permiso para este archivo o el plazo del evento terminó.',403);
+}
+export async function requirePhotographer(request:Request){const session=await authenticated(request);const admin=await session.db.rpc('is_admin');if(admin.error||!admin.data)throw new StorageError('Solo el fotógrafo puede comprobar el almacenamiento.',403);return session;}

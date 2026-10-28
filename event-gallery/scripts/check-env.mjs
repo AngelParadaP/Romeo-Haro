@@ -26,7 +26,7 @@ if (key.split('.').length === 3) {
 console.log(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ? '✓ Turnstile configurado en la web; revisa también su secreto en Supabase.' : '○ Turnstile no configurado. Recomendado antes de repartir enlaces públicos.');
 if (buildMode && !anyConfigured) console.log('○ Build de preparación: la pantalla de conexión se mostrará en producción.');
 if (process.env.NEXT_PUBLIC_DEMO_MODE === 'true') console.log('○ Modo demo habilitado sin Supabase. Desactívalo para producción.');
-if(process.env.NEXT_PUBLIC_STORAGE_PROVIDER && !['supabase','google-drive'].includes(process.env.NEXT_PUBLIC_STORAGE_PROVIDER)) { console.log('✗ NEXT_PUBLIC_STORAGE_PROVIDER debe ser supabase o google-drive.');failed=true; }
+if(process.env.NEXT_PUBLIC_STORAGE_PROVIDER && !['supabase','google-drive','r2'].includes(process.env.NEXT_PUBLIC_STORAGE_PROVIDER)) { console.log('✗ NEXT_PUBLIC_STORAGE_PROVIDER debe ser supabase, r2 o google-drive.');failed=true; }
 if(process.env.NEXT_PUBLIC_STORAGE_PROVIDER==='google-drive'){
  for(const name of ['SUPABASE_SERVICE_ROLE_KEY','APP_URL','GOOGLE_DRIVE_OWNER_ID','GOOGLE_DRIVE_CLIENT_ID','GOOGLE_DRIVE_CLIENT_SECRET','DRIVE_ENCRYPTION_KEY']){
   const ok=Boolean(process.env[name]);console.log(`${ok?'✓':'✗'} ${name}: ${ok?'configurada':'falta configurar'}`);if(!ok)failed=true;
@@ -34,5 +34,12 @@ if(process.env.NEXT_PUBLIC_STORAGE_PROVIDER==='google-drive'){
  if(process.env.DRIVE_ENCRYPTION_KEY&&Buffer.from(process.env.DRIVE_ENCRYPTION_KEY,'base64').length!==32){console.log('✗ DRIVE_ENCRYPTION_KEY debe contener 32 bytes en base64.');failed=true;}
  if(process.env.APP_URL){try{const url=new URL(process.env.APP_URL);if(url.pathname!=='/'||url.search||url.hash||url.username||url.password||!(url.protocol==='https:'||(url.protocol==='http:'&&url.hostname==='localhost')))throw new Error();}catch{console.log('✗ APP_URL debe ser un origen HTTPS (o http://localhost para desarrollo).');failed=true;}}
  if(process.env.GOOGLE_DRIVE_OWNER_ID&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(process.env.GOOGLE_DRIVE_OWNER_ID)){console.log('✗ GOOGLE_DRIVE_OWNER_ID debe ser el UUID de Supabase Auth.');failed=true;}
+}
+if(process.env.NEXT_PUBLIC_STORAGE_PROVIDER==='r2'){
+ for(const name of ['SUPABASE_SERVICE_ROLE_KEY','R2_ACCOUNT_ID','R2_BUCKET_NAME','R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY']){
+  const ok=Boolean(process.env[name]);console.log(`${ok?'✓':'✗'} ${name}: ${ok?'configurada':'falta configurar'}`);if(!ok)failed=true;
+ }
+ if(process.env.R2_ACCOUNT_ID&&!/^[a-f0-9]{32}$/i.test(process.env.R2_ACCOUNT_ID)){console.log('✗ R2_ACCOUNT_ID debe ser el ID de cuenta de 32 caracteres, no una URL.');failed=true;}
+ if(process.env.R2_BUCKET_NAME&&!/^[-a-z0-9.]{3,63}$/.test(process.env.R2_BUCKET_NAME)){console.log('✗ R2_BUCKET_NAME debe ser solo el nombre del bucket.');failed=true;}
 }
 process.exitCode = failed ? 1 : 0;

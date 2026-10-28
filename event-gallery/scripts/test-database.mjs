@@ -205,6 +205,21 @@ await test('Verified Drive and legacy photos coexist with gallery, export and ev
  await as(owner2);assert.equal((await db.query("select public.drive_access($1,'event-covers',true) as allowed",[coverPath])).rows[0].allowed,false);
  await as(owner);await assert.rejects(()=>db.query("update public.events set cover_provider='google-drive' where id=$1",[a]));
 });
+const r2Photo='40000000-0000-4000-8000-000000000002';const r2Path=`${a}/${guest}/${r2Photo}.jpg`;
+await test('R2 registry is server-only and an unverified R2 photo cannot be forged',async()=>{
+ await as(guest);await assert.rejects(()=>db.query('select * from public.r2_objects'));
+ await assert.rejects(()=>db.query("insert into public.r2_objects(bucket,path,object_key,event_id,uploader_id,size_bytes) values ('event-photos',$1,$2,$3,$4,20)",[r2Path,`event-photos/${r2Path}`,a,guest]));
+ const id='40000000-0000-4000-8000-000000000088';await assert.rejects(()=>db.query("insert into public.photos(id,event_id,author,storage_path,storage_provider) values ($1,$2,'Falsa',$3,'r2')",[id,a,`${a}/${guest}/${id}.jpg`]));
+ await as(owner);await assert.rejects(()=>db.query("update public.events set cover_provider='r2' where id=$1",[a]));
+});
+await test('R2, Drive and Supabase coexist without widening event access or export permissions',async()=>{
+ await db.exec('reset role');await db.query("insert into public.r2_objects(bucket,path,object_key,event_id,uploader_id,size_bytes) values ('event-photos',$1,$2,$3,$4,20)",[r2Path,`event-photos/${r2Path}`,a,guest]);
+ await db.query("update public.photos set storage_provider='r2' where id=$1",[r2Photo]);await as(guest);
+ assert.equal((await db.query("select public.storage_access($1,'event-photos','r2',false) as allowed",[r2Path])).rows[0].allowed,true);
+ const manifest=(await db.query('select * from public.download_page($1)',[a])).rows;
+ assert.equal(manifest.filter(p=>p.storage_provider==='r2').length,1);assert.equal(manifest.filter(p=>p.storage_provider==='google-drive').length,1);assert.equal(manifest.filter(p=>p.storage_provider==='supabase').length,11);
+ await as(outsider);assert.equal((await db.query("select public.storage_access($1,'event-photos','r2',false) as allowed",[r2Path])).rows[0].allowed,false);
+});
 await as(owner);
 await db.query("update public.events set uploads_open_at=now()-interval '49 hours',uploads_close_at=now()-interval '1 hour',archive_after_close=true where id=$1",[a]);
 await test('Automatic archive allows guest reading and downloads but forbids uploads and reactions immediately',async()=>{
@@ -216,6 +231,8 @@ await test('Automatic archive allows guest reading and downloads but forbids upl
   await db.query('select public.join_event($1)',[a]);
   assert.equal((await db.query('select * from public.download_page($1)',[a])).rows.length,13);
   assert.equal((await db.query('select public.gallery_page($1,1,true) as result',[a])).rows[0].result.total,1);
+  assert.equal((await db.query("select public.storage_access($1,'event-photos','r2',false) as allowed",[r2Path])).rows[0].allowed,true);
+  assert.equal((await db.query("select public.storage_access($1,'event-photos','r2',true) as allowed",[r2Path])).rows[0].allowed,false);
   assert.equal((await db.query('select app_private.can_upload_event($1) as allowed',[a])).rows[0].allowed,false);
   assert.equal((await db.query("select public.drive_access($1,'event-photos',true) as allowed",[path])).rows[0].allowed,false);
   await assert.rejects(()=>db.query('insert into public.photo_likes(photo_id) values ($1)', ['40000000-0000-4000-8000-000000000002']));
@@ -256,6 +273,7 @@ await test('Thirty-day expiry revokes event, photo, cover and download access be
     assert.equal((await db.query('select * from storage.objects')).rows.length,0);
     await assert.rejects(()=>db.query('select public.join_event($1)',[a]));
     await assert.rejects(()=>db.query('select public.gallery_page($1)',[a]));
+    assert.equal((await db.query("select public.storage_access($1,'event-photos','r2',false) as allowed",[r2Path])).rows[0].allowed,false);
     assert.equal((await db.query("select public.drive_access($1,'event-photos',false) as allowed",[path])).rows[0].allowed,false);
     await assert.rejects(()=>db.query('select * from public.download_page($1)',[a]));
     await assert.rejects(()=>db.query('select public.event_contact($1)',[a]));
@@ -307,6 +325,7 @@ await as(guest);
 await test('Retirement immediately closes consultation without deleting photos',async()=>{
   await assert.rejects(()=>db.query('select public.join_event($1)',[a]));
   await assert.rejects(()=>db.query('select public.gallery_page($1)',[a]));
+    assert.equal((await db.query("select public.storage_access($1,'event-photos','r2',false) as allowed",[r2Path])).rows[0].allowed,false);
     assert.equal((await db.query("select public.drive_access($1,'event-photos',false) as allowed",[path])).rows[0].allowed,false);
   assert.equal((await db.query('select * from storage.objects')).rows.length,0);
 });

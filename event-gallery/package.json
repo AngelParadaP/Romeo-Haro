@@ -12,11 +12,13 @@
     "check:env": "node scripts/check-env.mjs",
     "prebuild": "node scripts/check-env.mjs --build",
     "test:experience": "node scripts/test-experience.mjs",
-    "test:drive": "node scripts/test-drive.mjs"
+    "test:drive": "npm run test:storage",
+    "test:storage": "node scripts/test-storage.mjs"
   },
   "dependencies": {
     "@supabase/server": "^1.9.2",
     "@supabase/supabase-js": "^2.118.0",
+    "aws4fetch": "^1.0.20",
     "fflate": "^0.8.3",
     "next": "16.4.3",
     "qrcode": "^1.5.4",
@@ -37,6 +39,6 @@
   },
   "packageManager": "pnpm@10.28.2",
   "engines": {
-    "node": ">=22.0.0"
+    "node": "24.x"
   }
 }

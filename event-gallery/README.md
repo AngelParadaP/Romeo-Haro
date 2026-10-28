@@ -264,3 +264,9 @@ No requiere migración ni variables nuevas: se reutiliza `studio_profiles.addres
 Implementado para una cuenta dedicada y un fotógrafo: nuevas fotos/portadas en Drive, archivos existentes de Supabase compatibles, exportaciones combinadas, conexión OAuth desde **Almacenamiento** y consulta de espacio. Requiere **migración 008, variables de servidor y autorización de la cuenta de Google**; desplegar no basta para conectar. No migra ni elimina archivos existentes y aún no habilita videos.
 
 Sigue [la guía de instalación de Google Drive](docs/google-drive.md) para configurar Google Cloud, Supabase y Vercel. Pruebas de API: `npm run test:drive` con Node 22 o superior.
+
+## Cloudflare R2 (proveedor recomendado para nuevas subidas)
+
+Selecciona `NEXT_PUBLIC_STORAGE_PROVIDER=r2`, aplica **009** después de **008** y configura el bucket privado y las cuatro credenciales `R2_*`, además de la clave de servidor de Supabase. No requiere OAuth ni variables de Google. Se mantiene la lectura de archivos históricos de Supabase y Drive, con los permisos y las descargas existentes.
+
+Sigue [la guía de Cloudflare R2](docs/cloudflare-r2.md). El código no mueve ni elimina automáticamente archivos anteriores. Pruebas: `npm run test:storage` (el alias `test:drive` se conserva para compatibilidad).

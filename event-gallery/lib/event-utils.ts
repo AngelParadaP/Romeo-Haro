@@ -34,3 +34,22 @@ export function cropFromDrag(x:number,y:number,dx:number,dy:number,width:number,
   const clamp=(n:number)=>Math.min(100,Math.max(0,n));
   return {x:clamp(x-dx/Math.max(width,1)*100/zoom),y:clamp(y-dy/Math.max(height,1)*100/zoom)};
 }
+export const eventWindowHours=48;
+export type ClosingMode='none'|'48h'|'custom';
+export function openingFromEventDate(date:string){return date?`${date}T00:00`:'';}
+export function defaultClosingMode(event?:GalleryEvent):ClosingMode {
+  if(!event)return '48h';
+  if(!event.uploadsCloseAt)return 'none';
+  return event.uploadsOpenAt&&Date.parse(event.uploadsCloseAt)-Date.parse(event.uploadsOpenAt)===eventWindowHours*3600000?'48h':'custom';
+}
+export function uploadWindow(opening:string,closing:string,mode:ClosingMode){
+  const start=opening?new Date(opening).toISOString():null;
+  if(mode==='48h'&&!start)throw new Error('Selecciona la fecha del evento o una apertura para contar las 48 horas.');
+  const end=mode==='48h'?new Date(Date.parse(start!)+eventWindowHours*3600000).toISOString():mode==='custom'&&closing?new Date(closing).toISOString():null;
+  if(mode==='custom'&&!end)throw new Error('Selecciona la fecha y hora de cierre.');
+  if(start&&end&&Date.parse(end)<=Date.parse(start))throw new Error('El cierre debe ser posterior a la apertura.');
+  return {start,end};
+}
+export function isEventActive(event:GalleryEvent,now=Date.now()){
+  return event.active&&!(event.archiveAfterClose&&event.uploadsCloseAt&&now>=Date.parse(event.uploadsCloseAt));
+}

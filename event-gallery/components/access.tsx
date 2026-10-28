@@ -9,15 +9,18 @@ declare global { interface Window { turnstile?: TurnstileAPI } }
 
 function Captcha({ onToken }: { onToken: (token: string) => void }) {
   const container = useRef<HTMLDivElement>(null);
+  const [size,setSize]=useState<'compact'|'flexible'>('compact');
   const [loaded, setLoaded] = useState(false);
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  useEffect(()=>{const element=container.current;if(!element||!siteKey)return;const update=()=>setSize(element.clientWidth>=300?'flexible':'compact');update();const observer=new ResizeObserver(update);observer.observe(element);return()=>observer.disconnect();},[siteKey]);
   useEffect(() => {
     if (!loaded || !siteKey || !container.current || !window.turnstile) return;
-    const id = window.turnstile.render(container.current, { sitekey: siteKey, theme: "light", callback: onToken, "expired-callback": () => onToken(""), "error-callback": () => onToken("") });
+    onToken("");
+    const id = window.turnstile.render(container.current, { sitekey: siteKey, theme: "light", size, callback: onToken, "expired-callback": () => onToken(""), "error-callback": () => onToken("") });
     return () => window.turnstile?.remove(id);
-  }, [loaded, siteKey, onToken]);
+  }, [loaded, siteKey, onToken,size]);
   if (!siteKey) return null;
-  return <><Script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" onReady={() => setLoaded(true)} /><div ref={container} /></>;
+  return <><Script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" onReady={() => setLoaded(true)} /><div className="captcha-slot" ref={container} /></>;
 }
 
 export function Access({ guest = false, onGuest, onLogin }: { guest?: boolean; onGuest?: (name: string, captcha: string) => Promise<void>; onLogin?: () => Promise<void> }) {

@@ -226,3 +226,13 @@ Las fotografías individuales y los grupos vuelven a usar un solo botón **Guard
 Se limita el rebote fuera del contenido y el desbordamiento horizontal de la página, se usan alturas de viewport dinámicas en los modales y se bloquea el desplazamiento del fondo mientras están abiertos. Al cerrarlos se restaura la posición de lectura; la galería mantiene su desplazamiento normal para recorrer todas las fotografías. Los campos móviles usan 16 px para evitar el zoom automático al escribir. Estos cambios no añaden ninguna migración de base de datos.
 
 Moderación de fotos y álbum curado siguen siendo propuestas, no funciones implementadas por este ajuste.
+
+## Apertura, cierre y archivo automático
+
+Si ya aplicaste 001–005, ejecuta **solo** `supabase/migrations/202610270006_automatic_archive.sql` en el SQL Editor de Supabase y despliega el código actualizado en Vercel. No requiere nuevas variables. Los eventos existentes conservan su configuración; los nuevos proponen apertura a las **00:00 de la fecha del evento, en la zona horaria del dispositivo del fotógrafo**, cierre 48 horas después y archivo automático habilitado. La apertura puede editarse; «Usar fecha del evento» restaura el valor automático. Las 48 horas se cuentan como tiempo transcurrido desde la apertura elegida.
+
+El archivo conserva las fotos y el acceso del propietario, y cierra el acceso de invitados, igual que el archivo manual. Puedes desactivar el archivo automático o elegir otro cierre. La migración instala `pg_cron` cuando está disponible y programa `romeo-archive-expired-events` cada minuto. Comprueba que figure en **Supabase → Integrations → Cron**. Si el SQL muestra que pg_cron no está disponible, habilita Cron y programa `select app_private.archive_expired_events()` cada minuto. La función solo puede ejecutarla el administrador de base de datos/Cron, nunca los invitados ni fotógrafos desde el navegador.
+
+Las políticas RLS retiran el acceso de invitados exactamente al vencer el plazo, aunque el trabajo de Cron todavía no haya actualizado `active`. El panel también reconoce el plazo vencido; Cron persiste el estado archivado. La nueva marca `archive_after_close` queda desactivada en eventos existentes para no cambiar su acceso sin editar sus ajustes.
+
+El login usa centrado adaptable al viewport móvil, márgenes seguros, campos sin desbordamiento y CAPTCHA compacto cuando no cabe el formato flexible. En pantallas bajas permite desplazar el formulario.

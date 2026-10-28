@@ -11,7 +11,7 @@ async function loadTS(path){
   return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
 }
 const {buildPhotoArchives}=await loadTS('../lib/archives.ts');
-const {uploadStatus,matchesEvent,rememberGuest,rememberedGuest,sortEvents,monthDays,cropFromDrag}=await loadTS('../lib/event-utils.ts');
+const {uploadStatus,matchesEvent,rememberGuest,rememberedGuest,sortEvents,monthDays,cropFromDrag,openingFromEventDate,defaultClosingMode,uploadWindow,isEventActive}=await loadTS('../lib/event-utils.ts');
 const store=new Map();globalThis.localStorage={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)};
 rememberGuest('event-a','user-a','Ana');
 assert.equal(rememberedGuest('event-a','user-a'),'Ana');
@@ -52,3 +52,15 @@ Object.defineProperty(globalThis,'navigator',{configurable:true,value:{}});asser
 Object.defineProperty(globalThis,'navigator',{configurable:true,value:{share:async()=>{},canShare:()=>true}});assert.equal(canShareFiles([new File(['test'],'test.jpg',{type:'image/jpeg'})]),true);
 Object.defineProperty(globalThis,'navigator',{configurable:true,value:{share:async()=>{},canShare:()=>{throw new Error('blocked');}}});assert.equal(canShareFiles([]),false);assert.equal(wasCancelled(new DOMException('cancelled','AbortError')),true);
 console.log('✓ Native saving falls back when file sharing is unavailable or blocked and recognizes cancellation');
+
+assert.equal(openingFromEventDate('2026-11-14'),'2026-11-14T00:00');assert.equal(openingFromEventDate(''),'');
+assert.equal(defaultClosingMode(),'48h');assert.equal(defaultClosingMode(event),'none');
+const window48=uploadWindow('2026-11-14T00:00','','48h');
+assert.equal(Date.parse(window48.end)-Date.parse(window48.start),48*3600000);
+assert.equal(defaultClosingMode({...event,uploadsOpenAt:window48.start,uploadsCloseAt:window48.end}),'48h');
+const manual=uploadWindow('2026-11-14T18:30','','48h');assert.equal(Date.parse(manual.end)-Date.parse(manual.start),48*3600000);
+assert.throws(()=>uploadWindow('','','48h'));assert.throws(()=>uploadWindow('2026-11-14T18:30','2026-11-14T17:00','custom'));
+assert.equal(isEventActive({...event,archiveAfterClose:true,uploadsCloseAt:window48.end},Date.parse(window48.end)-1),true);
+assert.equal(isEventActive({...event,archiveAfterClose:true,uploadsCloseAt:window48.end},Date.parse(window48.end)),false);
+assert.equal(isEventActive({...event,archiveAfterClose:false,uploadsCloseAt:window48.end},Date.parse(window48.end)),true);
+console.log('✓ Event date seeds editable opening, new events default to 48h and archive exactly at deadline');

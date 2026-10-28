@@ -180,6 +180,27 @@ await test('Members can open event contact but cannot enumerate or modify studio
   await assert.rejects(()=>db.query("insert into public.studio_profiles(name) values ('Intrusión')"));
   assert.equal((await db.query("update public.studio_profiles set name='Intrusión' returning owner_id")).rows.length,0);
 });
+await as(owner);
+await db.query("update public.events set uploads_open_at=now()-interval '49 hours',uploads_close_at=now()-interval '1 hour',archive_after_close=true where id=$1",[a]);
+await test('Owner retains an expired event while automatic archive revokes guests immediately',async()=>{
+  assert.equal((await db.query('select * from public.events where id=$1',[a])).rows.length,1);
+  await assert.rejects(()=>db.query('select app_private.archive_expired_events()'));
+  await as(guest);
+  assert.equal((await db.query('select * from public.events where id=$1',[a])).rows.length,0);
+  assert.equal((await db.query('select * from public.photos where event_id=$1',[a])).rows.length,0);
+  await assert.rejects(()=>db.query('select public.join_event($1)',[a]));
+  await assert.rejects(()=>db.query('select * from public.download_page($1)',[a]));
+  await assert.rejects(()=>db.query('select app_private.archive_expired_events()'));
+});
+await db.exec('reset role');
+await test('Archive worker persists the change once and preserves photos and other events',async()=>{
+  assert.equal(Number((await db.query('select app_private.archive_expired_events() as count')).rows[0].count),1);
+  assert.equal(Number((await db.query('select app_private.archive_expired_events() as count')).rows[0].count),0);
+  assert.equal((await db.query('select active from public.events where id=$1',[a])).rows[0].active,false);
+  assert.equal((await db.query('select active from public.events where id=$1',[b])).rows[0].active,true);
+  assert.equal(Number((await db.query('select count(*) as count from public.photos where event_id=$1',[a])).rows[0].count),13);
+});
+await as(owner);await db.query('update public.events set active=true,archive_after_close=false,uploads_open_at=null,uploads_close_at=null where id=$1',[a]);
 await as(outsider);
 await test('Uninvited user cannot read images or react', async () => {
   assert.equal((await db.query('select * from public.photos')).rows.length, 0);

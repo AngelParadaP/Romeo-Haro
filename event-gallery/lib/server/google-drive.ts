@@ -1,0 +1,24 @@
+import 'server-only';
+import {serviceDB,setting,seal,unseal,StorageError} from './storage-auth';
+export type DriveConnection={owner_id:string;refresh_token_encrypted:string;root_folder_id:string;account_email:string};
+export async function connection(){const result=await serviceDB().from('drive_connections').select('*').eq('owner_id',setting('GOOGLE_DRIVE_OWNER_ID')).maybeSingle();if(result.error)throw new StorageError('Aplica la migración de Google Drive antes de conectar.',503);if(!result.data)throw new StorageError('El fotógrafo debe conectar Google Drive desde Almacenamiento.',503);return result.data as DriveConnection;}
+export async function googleTokens(params:Record<string,string>){const response=await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({...params,client_id:setting('GOOGLE_DRIVE_CLIENT_ID'),client_secret:setting('GOOGLE_DRIVE_CLIENT_SECRET')}),cache:'no-store',signal:AbortSignal.timeout(20000)});if(!response.ok)throw new StorageError('La autorización de Google Drive venció o no es válida. Reconecta la cuenta desde Almacenamiento.',503);return response.json() as Promise<{access_token:string;refresh_token?:string;scope?:string}>;}
+let cachedToken:{key:string;until:number;value:Promise<string>}|undefined;
+export async function accessToken(config:DriveConnection){
+ const key=config.refresh_token_encrypted;
+ if(cachedToken?.key===key&&cachedToken.until>Date.now())return cachedToken.value;
+ const value=(async()=>{const {refreshToken}=unseal<{refreshToken:string}>(key);return (await googleTokens({grant_type:'refresh_token',refresh_token:refreshToken})).access_token;})();
+ cachedToken={key,until:Date.now()+5*60000,value};try{return await value;}catch(error){if(cachedToken?.key===key)cachedToken=undefined;throw error;}
+}
+export async function driveFetch(token:string,path:string,init:RequestInit={}){const response=await fetch(`https://www.googleapis.com/drive/v3/${path}`,{...init,headers:{...init.headers,Authorization:`Bearer ${token}`},cache:'no-store',signal:AbortSignal.timeout(30000)});if(!response.ok){if(response.status===404)throw new StorageError('El archivo o carpeta ya no está disponible en Drive.',404);if(response.status===429)throw new StorageError('Google Drive está ocupado. Espera un momento e inténtalo de nuevo.',429);throw new StorageError('Google Drive no pudo completar la operación. Comprueba la autorización y el espacio disponible.',502);}return response;}
+export async function folder(token:string,name:string,parent?:string){const body={name,mimeType:'application/vnd.google-apps.folder',...(parent?{parents:[parent]}:{})};const response=await driveFetch(token,'files?fields=id',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return (await response.json()).id as string;}
+export async function eventFolder(token:string,root:string,eventId:string){const q=`'${root}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder' and name='${eventId}'`;const result=await driveFetch(token,`files?${new URLSearchParams({q,fields:'files(id)',pageSize:'1'})}`);const data=await result.json();return data.files?.[0]?.id||await folder(token,eventId,root);}
+export async function uploadJPEG(token:string,parent:string,name:string,blob:Blob){
+ const boundary=`rh_${crypto.randomUUID().replaceAll('-','')}`;const metadata=JSON.stringify({name,mimeType:'image/jpeg',parents:[parent]});
+ const body=new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: image/jpeg\r\n\r\n`,blob,`\r\n--${boundary}--\r\n`]);
+ const response=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':`multipart/related; boundary=${boundary}`},body,cache:'no-store',signal:AbortSignal.timeout(45000)});
+ if(!response.ok)throw new StorageError('No se pudo subir la foto a Drive. Comprueba el espacio y vuelve a intentarlo.',502);
+ return (await response.json()).id as string;
+}
+export async function trash(token:string,id:string){await driveFetch(token,`files/${encodeURIComponent(id)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({trashed:true})});}
+export {seal};

@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { GalleryEvent, Photo, StudioContact } from "./types";
+import type { GalleryEvent, Photo, StudioContact, StorageProvider } from "./types";
+import {driveURLs,driveUpload,useGoogleDrive,storageRequest} from "./drive-client";
 import {mapsLink} from "./maps";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -35,7 +36,7 @@ export async function startSession(eventId: string | null, captchaToken?: string
   return { userId: user.id, admin: Boolean(admin.data), events: await loadEvents(eventId) };
 }
 export async function loadEvents(eventId: string | null = null): Promise<GalleryEvent[]> {
-  let query = supabase().from("events").select("id,created_at,title,date,category,cover,active,description,invitation_text,cover_path,cover_x,cover_y,cover_zoom,uploads_open_at,uploads_close_at,archive_after_close,archived_at,photos(count)").is("deleted_at", null).order("created_at", { ascending: false });
+  let query = supabase().from("events").select("id,created_at,title,date,category,cover,active,description,invitation_text,cover_path,cover_provider,cover_x,cover_y,cover_zoom,uploads_open_at,uploads_close_at,archive_after_close,archived_at,photos(count)").is("deleted_at", null).order("created_at", { ascending: false });
   if (eventId) query = query.eq("id", eventId);
   else {
     const user = await supabase().auth.getUser(); check(user.error);
@@ -45,13 +46,15 @@ export async function loadEvents(eventId: string | null = null): Promise<Gallery
   const { data, error } = await query; check(error);
   return Promise.all((data || []).map(async row => {
     let cover = row.cover;
-    if (row.cover_path) {
+    if (row.cover_path&&row.cover_provider==='google-drive') {
+      [cover]=await driveURLs('event-covers',[row.cover_path]);
+    } else if (row.cover_path) {
       const signed = await supabase().storage.from("event-covers").createSignedUrl(row.cover_path, 900); check(signed.error);
       if (!signed.data?.signedUrl) throw new Error("No se pudo cargar la portada del evento.");
       cover = signed.data.signedUrl;
     }
     return { id: row.id, createdAt: row.created_at, title: row.title, date: row.date, category: row.category, active: row.active, cover,
-      description: row.description, invitationText:row.invitation_text, coverPath: row.cover_path, coverX: row.cover_x, coverY: row.cover_y, coverZoom: Number(row.cover_zoom),
+      description: row.description, invitationText:row.invitation_text, coverPath: row.cover_path, coverProvider:row.cover_provider, coverX: row.cover_x, coverY: row.cover_y, coverZoom: Number(row.cover_zoom),
       archivedAt:row.archived_at, archiveAfterClose:row.archive_after_close, uploadsOpenAt: row.uploads_open_at, uploadsCloseAt: row.uploads_close_at, photos: [], photoCount: row.photos?.[0]?.count ?? 0 };
   }));
 }
@@ -59,7 +62,7 @@ export async function persistEvent(event: GalleryEvent, exists: boolean) {
   const db = supabase();
   const values = { title: event.title, date: event.date, category: event.category, cover: event.coverPath ? "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=85" : event.cover, active: event.active,
     invitation_text:event.invitationText ?? 'Te invitamos a compartir tus mejores recuerdos.',
-    description: event.description ?? "Un día especial. Todas las miradas. Un mismo recuerdo.", cover_path: event.coverPath || null,
+    description: event.description ?? "Un día especial. Todas las miradas. Un mismo recuerdo.", cover_path: event.coverPath || null, cover_provider:event.coverProvider||"supabase",
     cover_x: event.coverX ?? 50, cover_y: event.coverY ?? 50, cover_zoom: event.coverZoom ?? 1,
     archive_after_close:Boolean(event.archiveAfterClose&&event.uploadsCloseAt), uploads_open_at: event.uploadsOpenAt || null, uploads_close_at: event.uploadsCloseAt || null };
   const query = exists ? db.from("events").update(values).eq("id", event.id) : db.from("events").insert({ ...values, id: event.id });
@@ -72,23 +75,25 @@ export async function removeEvent(id: string) {
   const { data, error } = await supabase().from("events").update({ active: false, deleted_at: new Date().toISOString() }).eq("id", id).select("id").single();
   check(error); if (!data) throw new Error("No se pudo eliminar el evento.");
 }
-type PhotoRow = { id: string; storage_path: string; author: string; like_count: number; liked: boolean; favorite: boolean };
+type PhotoRow = { id: string; storage_path: string; storage_provider:StorageProvider; author: string; like_count: number; liked: boolean; favorite: boolean };
 export async function loadGallery(eventId: string, page: number, favorites: boolean, userId: string): Promise<{ photos: Photo[]; total: number }> {
   const db = supabase();
   const { data, error } = await db.rpc("gallery_page", { event_token: eventId, page_number: page, only_favorites: favorites }); check(error);
   const rows = data.items as PhotoRow[];
   if (!rows.length) return { photos: [], total: data.total };
-  const signed = await db.storage.from("event-photos").createSignedUrls(rows.map(row => row.storage_path), 900); check(signed.error);
-  return { total: data.total, photos: rows.map((row, i) => {
-    const result = signed.data?.[i];
-    if (!result?.signedUrl || result.error) throw new Error("No se pudo autorizar una fotografía. Actualiza la galería.");
-    return { id: row.id, storagePath: row.storage_path, src: result.signedUrl, author: row.author, likeCount: row.like_count, likes: row.liked ? [userId] : [], favorites: row.favorite ? [userId] : [] };
-  }) };
+  const legacy=rows.filter(row=>row.storage_provider!=='google-drive');
+  const signed=legacy.length?await db.storage.from("event-photos").createSignedUrls(legacy.map(row=>row.storage_path),900):null;
+  if(signed)check(signed.error);
+  const urls=new Map<string,string>();
+  legacy.forEach((row,i)=>{const result=signed?.data?.[i];if(!result?.signedUrl||result.error)throw new Error("No se pudo autorizar una fotografía.");urls.set(row.storage_path,result.signedUrl);});
+  const drive=rows.filter(row=>row.storage_provider==='google-drive');const driveLinks=await driveURLs('event-photos',drive.map(row=>row.storage_path));drive.forEach((row,i)=>urls.set(row.storage_path,driveLinks[i]));
+  return {total:data.total,photos:rows.map(row=>({id:row.id,storagePath:row.storage_path,storageProvider:row.storage_provider,src:urls.get(row.storage_path)!,author:row.author,likeCount:row.like_count,likes:row.liked?[userId]:[],favorites:row.favorite?[userId]:[]}))};
 }
 export async function uploadPhoto(eventId: string, userId: string, author: string, src: string) {
   const db = supabase(); const id = crypto.randomUUID(); const path = `${eventId}/${userId}/${id}.jpg`;
   const blob = await (await fetch(src)).blob();
   if (blob.size > 3 * 1024 * 1024) throw new Error("La imagen comprimida supera 3 MB.");
+  if(useGoogleDrive){await driveUpload('event-photos',eventId,blob,author);return;}
   const uploaded = await db.storage.from("event-photos").upload(path, blob, { contentType: "image/jpeg", upsert: false }); check(uploaded.error);
   const inserted = await db.from("photos").insert({ id, event_id: eventId, author_id: userId, author, storage_path: path });
   if (inserted.error) {
@@ -106,10 +111,12 @@ export async function uploadCover(eventId: string, userId: string, src: string) 
   const path = `${userId}/${eventId}/${crypto.randomUUID()}.jpg`;
   const blob = await (await fetch(src)).blob();
   if (blob.size > 3 * 1024 * 1024) throw new Error("La portada comprimida supera 3 MB.");
+  if(useGoogleDrive)return (await driveUpload('event-covers',eventId,blob)).path;
   const result = await supabase().storage.from("event-covers").upload(path, blob, { contentType: "image/jpeg" }); check(result.error);
   return path;
 }
 export async function discardCover(path: string) {
+  if(useGoogleDrive){await storageRequest("/api/storage/file",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({path})});return;}
   const result = await supabase().storage.from("event-covers").remove([path]); check(result.error);
 }
 

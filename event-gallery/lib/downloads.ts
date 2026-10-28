@@ -1,4 +1,5 @@
 import { supabase } from './cloud';
+import {driveDownload} from './drive-client';
 import type { Photo } from './types';
 import type { ArchiveFile } from './archives';
 export function saveBlob(blob: Blob, filename: string) {
@@ -6,6 +7,7 @@ export function saveBlob(blob: Blob, filename: string) {
   document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
 export async function photoBlob(photo: Photo) {
+  if(photo.storagePath&&photo.storageProvider==='google-drive')return driveDownload('event-photos',photo.storagePath);
   if(photo.storagePath){const result=await supabase().storage.from('event-photos').download(photo.storagePath);if(result.error)throw result.error;return result.data;}
   const result=await fetch(photo.src);if(!result.ok)throw new Error('No se pudo descargar la fotografía.');return result.blob();
 }
@@ -17,9 +19,9 @@ export async function* collectionFiles(eventId: string, favorites: boolean, loca
     signal.throwIfAborted();
     const result=await supabase().rpc('download_page',{event_token:eventId,after_id:after,cutoff,only_favorites:favorites});
     if(result.error)throw result.error;
-    const rows=result.data as {id:string;storage_path:string}[];
+    const rows=result.data as {id:string;storage_path:string;storage_provider?:string}[];
     if(!rows.length)return;
-    for(const row of rows){signal.throwIfAborted();const file=await supabase().storage.from('event-photos').download(row.storage_path);if(file.error)throw file.error;yield {id:row.id,blob:file.data};}
+    for(const row of rows){signal.throwIfAborted();if(row.storage_provider==='google-drive'){yield {id:row.id,blob:await driveDownload('event-photos',row.storage_path)};continue;}const file=await supabase().storage.from('event-photos').download(row.storage_path);if(file.error)throw file.error;yield {id:row.id,blob:file.data};}
     after=rows[rows.length-1].id;
   }
 }

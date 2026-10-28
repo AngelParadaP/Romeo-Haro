@@ -13,6 +13,8 @@ import {Icon} from "@/components/icon";
 import {ContactDialog} from "@/components/contact-dialog";
 import {FileSaveDialog} from "@/components/file-save-dialog";
 import {EventCalendar} from "@/components/event-calendar";
+import {useGoogleDrive} from "@/lib/drive-client";
+import {StorageDialog} from "@/components/storage-dialog";
 import { ShareDialog } from "@/components/share-dialog";
 
 const images = ["photo-1519741497674-611481863552", "photo-1511795409834-ef04bbd61622", "photo-1464366400600-7168b8af9bc3"];
@@ -36,8 +38,10 @@ export default function Home() {
   const [view,setView]=useState<'list'|'calendar'>('list');
   const [category,setCategory]=useState('all');
   const [order,setOrder]=useState<EventSort>('created-desc');
+  const [storageOpen,setStorageOpen]=useState(false);
   const [contactOpen,setContactOpen]=useState(false);
   const [savingPhoto,setSavingPhoto]=useState<Photo|null>(null);
+  const closeStorage=useCallback(()=>setStorageOpen(false),[]);
   const closeContact=useCallback(()=>setContactOpen(false),[]);
   const [query, setQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -68,7 +72,10 @@ export default function Home() {
   useEffect(() => {
     let alive = true;
     const route = async () => {
-      const id = new URLSearchParams(location.search).get("evento");
+      const params=new URLSearchParams(location.search);
+      const id = params.get("evento");
+      if(params.get('drive')==='connected'){setStorageOpen(true);setToast('Google Drive conectado.');}
+      if(params.get('drive')==='error'){setStorageOpen(true);setToast('No se pudo conectar Drive. Revisa la configuración y reconecta la misma cuenta dedicada.');}
       setSelected(id); setPublicView(!!id); setPage(1); setReady(false); setInitError("");
       try {
         if (cloudConfigured) {
@@ -209,7 +216,7 @@ export default function Home() {
     const session = await startSession(null); setAdmin(session.admin); setGuestId(session.userId); setEvents(session.events); setReady(true);
   }} />;
   return <div className="app-shell">
-    {!publicView && <aside className="sidebar"><a className="brand" href="/">r<span>h</span></a><div className="studio">ROMEO HARO<span>ESTUDIO FOTOGRÁFICO</span></div><div className="nav-label">TU ESPACIO</div><button className={!selected&&view==='list'&&category==='all'?'nav-item active':'nav-item'} onClick={()=>{setSelected(null);setView('list');setCategory('all');}}><Icon name="grid"/>Mis eventos<small>{events.length}</small></button><button className={!selected&&view==='calendar'?'nav-item active':'nav-item'} onClick={()=>{setSelected(null);setView('calendar');}}><Icon name="calendar"/>Calendario</button><button className="nav-item" onClick={()=>setContactOpen(true)}><Icon name="contact"/>Contacto del estudio</button><div className="nav-label category-label">TIPO DE EVENTO</div><div className="category-nav">{eventCategories.map((type,i)=><button key={type} className={!selected&&view==='list'&&category===type?'nav-category active':'nav-category'} onClick={()=>{setSelected(null);setView('list');setCategory(type);}}><i className={`category-${i}`}/><span>{type}</span><small>{events.filter(event=>event.category===type).length}</small></button>)}</div><div className="sidebar-note"><p>Los mejores recuerdos<br />se construyen juntos.</p><small>Crea. Comparte. Revive.</small></div><div className="profile"><b>RH</b><div>Romeo Haro<small>{cloudConfigured ? "Fotógrafo · Conectado" : "Fotógrafo · Demo local"}</small></div><span><Icon name="chevron" size={14} style={{transform:"rotate(90deg)"}}/></span></div></aside>}
+    {!publicView && <aside className="sidebar"><a className="brand" href="/">r<span>h</span></a><div className="studio">ROMEO HARO<span>ESTUDIO FOTOGRÁFICO</span></div><div className="nav-label">TU ESPACIO</div><button className={!selected&&view==='list'&&category==='all'?'nav-item active':'nav-item'} onClick={()=>{setSelected(null);setView('list');setCategory('all');}}><Icon name="grid"/>Mis eventos<small>{events.length}</small></button><button className={!selected&&view==='calendar'?'nav-item active':'nav-item'} onClick={()=>{setSelected(null);setView('calendar');}}><Icon name="calendar"/>Calendario</button><button className="nav-item" onClick={()=>setContactOpen(true)}><Icon name="contact"/>Contacto del estudio</button><button className="nav-item" onClick={()=>setStorageOpen(true)}><Icon name="image"/>Almacenamiento</button><div className="nav-label category-label">TIPO DE EVENTO</div><div className="category-nav">{eventCategories.map((type,i)=><button key={type} className={!selected&&view==='list'&&category===type?'nav-category active':'nav-category'} onClick={()=>{setSelected(null);setView('list');setCategory(type);}}><i className={`category-${i}`}/><span>{type}</span><small>{events.filter(event=>event.category===type).length}</small></button>)}</div><div className="sidebar-note"><p>Los mejores recuerdos<br />se construyen juntos.</p><small>Crea. Comparte. Revive.</small></div><div className="profile"><b>RH</b><div>Romeo Haro<small>{cloudConfigured ? "Fotógrafo · Conectado" : "Fotógrafo · Demo local"}</small></div><span><Icon name="chevron" size={14} style={{transform:"rotate(90deg)"}}/></span></div></aside>}
     <div className={publicView ? "workspace public" : `workspace ${!selected&&view==='calendar'?'calendar-mode':''}`}>
       <header><span>{publicView ? "ROMEO HARO / RECUERDOS COMPARTIDOS" : "Mi estudio"}{!publicView && <span className="breadcrumb"> / {current ? current.title : view==='calendar'?'Calendario':category==='all'?'Mis eventos':category}</span>}</span><div>{!publicView && <span className="local-pill"><i /> {cloudConfigured ? "Estudio conectado" : "Demo local"}</span>}{publicView&&<button className="secondary guest-contact" onClick={()=>setContactOpen(true)}><Icon name="contact"/>Contacto</button>}<span className="avatar">RH</span>{cloudConfigured && !publicView && <button className="logout" onClick={async () => { const result = await supabase().auth.signOut(); if (result.error) setToast(result.error.message); else location.reload(); }}>Salir</button>}</div></header>
       <main>
@@ -230,6 +237,7 @@ export default function Home() {
       <footer><span>ROMEO HARO </span><p>Hecho para vivirlo. Creado para recordarlo.</p><small>{publicView ? "Recuerdos compartidos" : cloudConfigured ? "Galería compartida" : "Prototipo · Datos guardados en este navegador"}</small></footer>
       </main>
     </div>
+    {storageOpen&&<StorageDialog onClose={closeStorage}/>}
     {contactOpen&&<ContactDialog eventId={publicView?selected??undefined:undefined} editing={!publicView} onClose={closeContact}/>}
     {savingPhoto&&<FileSaveDialog photo={savingPhoto} onClose={()=>setSavingPhoto(null)}/>}
     {shareEvent && <ShareDialog id={shareEvent.id} title={shareEvent.title} invitationText={events.find(event=>event.id===shareEvent.id)?.invitationText} canEdit={!publicView&&(admin||!cloudConfigured)} local={!cloudConfigured} onClose={closeShare} onSaveText={async text=>{
@@ -240,7 +248,7 @@ export default function Home() {
     {modal && <EventEditor event={events.find(event=>event.id===editing)} defaultCover={pic(events.length)} defaultCategory={category==='all'?'Boda':category} onClose={()=>setModal(false)} onSave={async(event,newCover)=>{
       let path: string|undefined;
       try{
-        if(cloudConfigured&&newCover){path=await uploadCover(event.id,guestId,event.cover);event={...event,coverPath:path};}
+        if(cloudConfigured&&newCover){path=await uploadCover(event.id,guestId,event.cover);event={...event,coverPath:path,coverProvider:useGoogleDrive?"google-drive":"supabase"};}
         const old=events.find(item=>item.id===event.id);
         const saved=await save(old?events.map(item=>item.id===event.id?event:item):[event,...events]);
         if(!saved){if(path)await discardCover(path);return false;}

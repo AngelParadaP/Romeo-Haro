@@ -1,0 +1,64 @@
+// Exercise the real route handlers with mocked Supabase/Google HTTP endpoints.
+// No credentials, remote files, account permissions or production data are used.
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {createRequire} from 'node:module';
+import {pathToFileURL,fileURLToPath} from 'node:url';
+import path from 'node:path';
+import ts from 'typescript';
+const require=createRequire(import.meta.url);const root=fileURLToPath(new URL('../',import.meta.url));const modules=new Map();
+async function moduleURL(filename){if(modules.has(filename))return modules.get(filename);let source=ts.transpileModule(await readFile(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/import ['"]server-only['"];?/g,'');
+ for(const match of [...source.matchAll(/from\s+['"]([^'"]+)['"]/g)]){const spec=match[1];let resolved;if(spec.startsWith('@/'))resolved=await moduleURL(path.join(root,spec.slice(2)+'.ts'));else if(spec.startsWith('.'))resolved=await moduleURL(path.resolve(path.dirname(filename),spec+'.ts'));else if(!spec.startsWith('node:'))resolved=pathToFileURL(require.resolve(spec)).href;if(resolved)source=source.replace(match[0],`from '${resolved}'`);}
+ const url=`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;modules.set(filename,url);return url;
+}
+const load=async p=>import(await moduleURL(path.join(root,p)));
+const owner='10000000-0000-4000-8000-000000000001',guest='20000000-0000-4000-8000-000000000001',event='30000000-0000-4000-8000-000000000001';
+Object.assign(process.env,{NEXT_PUBLIC_STORAGE_PROVIDER:'google-drive',NEXT_PUBLIC_SUPABASE_URL:'https://db.example.test',NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:'sb_publishable_test',SUPABASE_SERVICE_ROLE_KEY:'sb_secret_test',APP_URL:'https://app.example.test',GOOGLE_DRIVE_OWNER_ID:owner,GOOGLE_DRIVE_CLIENT_ID:'client-test',GOOGLE_DRIVE_CLIENT_SECRET:'secret-test',DRIVE_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64')});
+const auth=await load('lib/server/storage-auth.ts');const {NextRequest}=require('next/server');
+const connection={owner_id:owner,refresh_token_encrypted:auth.seal({refreshToken:'refresh-test'}),root_folder_id:'folder-test',account_email:'dedicated@example.test'};
+let user=guest,allow=true,hasConnection=true,registered,photoInserted=false,trashed=0,linked=false,denyInsert=false;let count=0;
+const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
+const jpeg=new Uint8Array([255,216,255,224,0,0,255,217]);
+globalThis.fetch=async(input,init={})=>{
+ const url=new URL(String(input));const method=init.method||'GET';const body=typeof init.body==='string'?JSON.parse(init.body):null;
+ if(url.hostname==='db.example.test'){
+  if(url.pathname==='/auth/v1/user')return json({id:user,role:'authenticated'});
+  if(url.pathname.endsWith('/rpc/is_admin'))return json(user===owner);
+  if(url.pathname.endsWith('/rpc/drive_access'))return json(allow);
+  if(url.pathname.endsWith('/events'))return json(new URLSearchParams(url.search).get('select')==='owner_id'?{owner_id:owner}:linked?[{id:event}]:[]);
+  if(url.pathname.endsWith('/admin_users'))return json({user_id:owner});
+  if(url.pathname.endsWith('/drive_connections'))return json(method==='GET'?(hasConnection?connection:null):null);
+  if(url.pathname.endsWith('/drive_objects')){if(method==='POST'){registered=body;return json(null,201);}if(method==='DELETE'){registered=undefined;return json(null);}return json({drive_file_id:'file-test'});}
+  if(url.pathname.endsWith('/photos')){if(method==='GET')return json(null);if(denyInsert)return json({code:'42501',message:'closed'},403);photoInserted=true;return json(null,201);}
+ }
+ if(url.hostname==='oauth2.googleapis.com')return json({access_token:'access-test',refresh_token:'refresh-test',scope:'https://www.googleapis.com/auth/drive.file'});
+ if(url.hostname==='www.googleapis.com'){
+  if(url.pathname.includes('/upload/')){assert.ok(init.body instanceof Blob);return json({id:'file-test'});}
+  if(url.pathname.endsWith('/about'))return json({user:{emailAddress:'dedicated@example.test'},storageQuota:{usage:'100',limit:'10000'}});
+  if(method==='PATCH'){trashed++;return json({});}
+  if(url.searchParams.get('alt')==='media')return new Response(jpeg,{headers:{'Content-Type':'image/jpeg'}});
+  if(method==='POST')return json({id:'root-test'});
+  if(url.pathname.endsWith('/files'))return json({files:[{id:'event-folder-test'}]});
+ }
+ throw new Error(`Unexpected mock endpoint ${url.origin}${url.pathname}`);
+};
+function request(endpoint,options={}){return new Request(`https://app.example.test/api/storage/${endpoint}`,{...options,headers:{Authorization:'Bearer user-token',...options.headers}});}
+async function test(name,fn){await fn();count++;console.log(`✓ ${name}`);}
+const upload=await load('app/api/storage/upload/route.ts');const urls=await load('app/api/storage/urls/route.ts');const file=await load('app/api/storage/file/route.ts');const start=await load('app/api/storage/google/start/route.ts');const callback=await load('app/api/storage/google/callback/route.ts');
+await test('Encrypted credentials round-trip and reject tampering',async()=>{const encrypted=auth.seal({token:'private'});assert.equal(encrypted.includes('private'),false);assert.deepEqual(auth.unseal(encrypted),{token:'private'});assert.throws(()=>auth.unseal(encrypted.slice(0,-4)+'AAAA'));});
+await test('Unauthenticated file and OAuth requests are rejected',async()=>{assert.equal((await file.GET(new Request('https://app.example.test/api/storage/file'))).status,401);assert.equal((await start.POST(new Request('https://app.example.test/api/storage/google/start',{method:'POST'}))).status,401);});
+await test('A guest cannot connect the dedicated Drive',async()=>{assert.equal((await start.POST(request('google/start',{method:'POST'}))).status,403);});
+await test('Denied event upload stops before writing to Drive',async()=>{allow=false;const response=await upload.POST(request(`upload?bucket=event-photos&eventId=${event}`,{method:'POST',headers:{'Content-Type':'image/jpeg','X-Photo-Author':'Ana'},body:jpeg}));assert.equal(response.status,403);assert.equal(registered,undefined);allow=true;});
+await test('Malformed or oversized media cannot be published',async()=>{for(const [body,headers,status] of [[new Uint8Array([1,2,3]),{},400],[jpeg,{'Content-Length':String(4*1024*1024)},413]]){const response=await upload.POST(request(`upload?bucket=event-photos&eventId=${event}`,{method:'POST',headers:{'Content-Type':'image/jpeg','X-Photo-Author':'Ana',...headers},body}));assert.equal(response.status,status);assert.equal(photoInserted,false);}});
+await test('A valid JPEG is uploaded privately and published with a verified registry',async()=>{const response=await upload.POST(request(`upload?bucket=event-photos&eventId=${event}`,{method:'POST',headers:{'Content-Type':'image/jpeg','X-Photo-Author':'Ana'},body:jpeg}));assert.equal(response.status,200);const result=await response.json();assert.equal(result.provider,'google-drive');assert.equal(registered.drive_file_id,'file-test');assert.equal(registered.uploader_id,guest);assert.equal(registered.path,result.path);assert.equal(photoInserted,true);});
+await test('Failed metadata publication trashes only the newly uploaded file',async()=>{denyInsert=true;const before=trashed;const response=await upload.POST(request(`upload?bucket=event-photos&eventId=${event}`,{method:'POST',headers:{'Content-Type':'image/jpeg','X-Photo-Author':'Ana'},body:jpeg}));assert.equal(response.status,409);assert.equal(trashed,before+1);denyInsert=false;});
+const objectPath=`${event}/${guest}/40000000-0000-4000-8000-000000000001.jpg`;
+let cookie;
+await test('Private image URLs use an HttpOnly cookie instead of leaking Google or Supabase tokens',async()=>{const response=await urls.POST(request('urls',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bucket:'event-photos',paths:[objectPath]})}));assert.equal(response.status,200);cookie=response.headers.get('set-cookie').split(';')[0];assert.match(response.headers.get('set-cookie'),/HttpOnly/i);const result=await response.json();assert.equal(result.urls[0].includes('token'),false);assert.equal(result.urls[0].includes('file-test'),false);});
+await test('The image route validates cookie sessions and returns private, noncacheable bytes',async()=>{const response=await file.GET(new Request(`https://app.example.test/api/storage/file?${new URLSearchParams({bucket:'event-photos',path:objectPath})}`,{headers:{Cookie:cookie}}));assert.equal(response.status,200);assert.equal(response.headers.get('Cache-Control'),'private, no-store');assert.deepEqual(new Uint8Array(await response.arrayBuffer()),jpeg);});
+await test('Permissions are checked again after issuing the image URL',async()=>{allow=false;const response=await file.GET(request(`file?${new URLSearchParams({bucket:'event-photos',path:objectPath})}`));assert.equal(response.status,403);allow=true;});
+await test('OAuth start uses state, PKCE and only the narrow drive.file scope',async()=>{user=owner;const response=await start.POST(request('google/start',{method:'POST'}));assert.equal(response.status,200);const {url}=await response.json();const query=new URL(url).searchParams;assert.equal(query.get('scope'),'https://www.googleapis.com/auth/drive.file');assert.equal(query.get('code_challenge_method'),'S256');assert.equal(query.get('access_type'),'offline');assert.ok(query.get('state'));});
+await test('OAuth callback rejects mismatched state without connecting an account',async()=>{const state=auth.seal({state:'expected',verifier:'test',userId:owner,exp:Date.now()+60000});const response=await callback.GET(new NextRequest('https://app.example.test/api/storage/google/callback?state=wrong&code=test',{headers:{Cookie:`rh_drive_oauth=${state}`}}));assert.match(response.headers.get('Location'),/drive=error/);});
+await test('OAuth callback connects the dedicated account without exposing refresh tokens',async()=>{hasConnection=false;const state=auth.seal({state:'expected',verifier:'test',userId:owner,exp:Date.now()+60000});const response=await callback.GET(new NextRequest('https://app.example.test/api/storage/google/callback?state=expected&code=test',{headers:{Cookie:`rh_drive_oauth=${state}`}}));assert.match(response.headers.get('Location'),/drive=connected/);assert.equal(response.headers.get('Location').includes('refresh'),false);hasConnection=true;});
+await test('Cleanup refuses to trash a cover still linked to any event',async()=>{linked=true;const before=trashed;const response=await file.DELETE(request('file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:`${owner}/${event}/40000000-0000-4000-8000-000000000001.jpg`})}));assert.equal(response.status,409);assert.equal(trashed,before);});
+console.log(`\n${count} Google Drive route/security checks passed (mocked external services).`);

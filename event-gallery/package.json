@@ -11,7 +11,8 @@
     "test:db": "node scripts/test-database.mjs",
     "check:env": "node scripts/check-env.mjs",
     "prebuild": "node scripts/check-env.mjs --build",
-    "test:experience": "node scripts/test-experience.mjs"
+    "test:experience": "node scripts/test-experience.mjs",
+    "test:drive": "node scripts/test-drive.mjs"
   },
   "dependencies": {
     "@supabase/server": "^1.9.2",

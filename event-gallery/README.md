@@ -258,3 +258,9 @@ La portada de invitados ahora tiene dimensiones y posición absolutas dentro de 
 En **Contacto del estudio → Enlace de Google Maps**, pega el enlace que obtienes en Google Maps mediante **Compartir → Copiar enlace**. Se aceptan enlaces HTTPS de Google Maps (incluidos `maps.app.goo.gl` y `goo.gl/maps`) de hasta 500 caracteres. Es opcional. Los invitados verán **Abrir ubicación en Google Maps** y abrirán directamente ese enlace, sin reconstruir una búsqueda con la dirección.
 
 No requiere migración ni variables nuevas: se reutiliza `studio_profiles.address`. Las direcciones anteriores siguen mostrándose con su búsqueda anterior hasta que el fotógrafo las reemplace; al guardar el contacto, la ubicación debe ser un enlace válido o quedar vacía. Despliega el código actualizado en Vercel y guarda el enlace desde el panel.
+
+## Google Drive como almacenamiento privado
+
+Implementado para una cuenta dedicada y un fotógrafo: nuevas fotos/portadas en Drive, archivos existentes de Supabase compatibles, exportaciones combinadas, conexión OAuth desde **Almacenamiento** y consulta de espacio. Requiere **migración 008, variables de servidor y autorización de la cuenta de Google**; desplegar no basta para conectar. No migra ni elimina archivos existentes y aún no habilita videos.
+
+Sigue [la guía de instalación de Google Drive](docs/google-drive.md) para configurar Google Cloud, Supabase y Vercel. Pruebas de API: `npm run test:drive` con Node 22 o superior.

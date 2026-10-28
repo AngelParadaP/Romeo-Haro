@@ -28,3 +28,6 @@ html{min-height:100%;overflow-x:clip;overscroll-behavior-y:none}body{min-height:
 .event-picture>.cover-image{position:absolute;inset:0;width:100%;height:100%;max-width:none;object-fit:cover}
 .archive-deadline{font-size:12px!important;color:var(--green)!important;line-height:1.7;font-weight:500}
 .photo-card button:disabled{opacity:.5;cursor:default}
+
+.storage-dialog{width:490px;display:grid;gap:18px}.storage-dialog>h2{margin:0}.storage-dialog>.dialog-emblem{margin:0}.storage-state{display:flex;gap:10px;align-items:center;font-size:13px}.storage-quota{display:grid;gap:12px;padding:18px;background:#edf2e6;border-radius:9px}.storage-quota b{font-size:13px}.storage-quota small{font-size:10px;color:var(--muted);line-height:1.6}.storage-quota progress{width:100%;accent-color:var(--green);height:10px}.storage-retention{border-top:1px solid var(--line);padding-top:16px}
+@media(max-width:760px){.sidebar>.nav-item{flex-basis:calc(50% - 8px)}}

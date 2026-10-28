@@ -34,7 +34,7 @@ export async function startSession(eventId: string | null, captchaToken?: string
   return { userId: user.id, admin: Boolean(admin.data), events: await loadEvents(eventId) };
 }
 export async function loadEvents(eventId: string | null = null): Promise<GalleryEvent[]> {
-  let query = supabase().from("events").select("id,created_at,title,date,category,cover,active,description,invitation_text,cover_path,cover_x,cover_y,cover_zoom,uploads_open_at,uploads_close_at,archive_after_close,photos(count)").is("deleted_at", null).order("created_at", { ascending: false });
+  let query = supabase().from("events").select("id,created_at,title,date,category,cover,active,description,invitation_text,cover_path,cover_x,cover_y,cover_zoom,uploads_open_at,uploads_close_at,archive_after_close,archived_at,photos(count)").is("deleted_at", null).order("created_at", { ascending: false });
   if (eventId) query = query.eq("id", eventId);
   else {
     const user = await supabase().auth.getUser(); check(user.error);
@@ -51,7 +51,7 @@ export async function loadEvents(eventId: string | null = null): Promise<Gallery
     }
     return { id: row.id, createdAt: row.created_at, title: row.title, date: row.date, category: row.category, active: row.active, cover,
       description: row.description, invitationText:row.invitation_text, coverPath: row.cover_path, coverX: row.cover_x, coverY: row.cover_y, coverZoom: Number(row.cover_zoom),
-      archiveAfterClose:row.archive_after_close, uploadsOpenAt: row.uploads_open_at, uploadsCloseAt: row.uploads_close_at, photos: [], photoCount: row.photos?.[0]?.count ?? 0 };
+      archivedAt:row.archived_at, archiveAfterClose:row.archive_after_close, uploadsOpenAt: row.uploads_open_at, uploadsCloseAt: row.uploads_close_at, photos: [], photoCount: row.photos?.[0]?.count ?? 0 };
   }));
 }
 export async function persistEvent(event: GalleryEvent, exists: boolean) {
@@ -62,8 +62,9 @@ export async function persistEvent(event: GalleryEvent, exists: boolean) {
     cover_x: event.coverX ?? 50, cover_y: event.coverY ?? 50, cover_zoom: event.coverZoom ?? 1,
     archive_after_close:Boolean(event.archiveAfterClose&&event.uploadsCloseAt), uploads_open_at: event.uploadsOpenAt || null, uploads_close_at: event.uploadsCloseAt || null };
   const query = exists ? db.from("events").update(values).eq("id", event.id) : db.from("events").insert({ ...values, id: event.id });
-  const { data, error } = await query.select("id").single(); check(error);
+  const { data, error } = await query.select("id,archived_at").single(); check(error);
   if (!data) throw new Error("No se pudo guardar el evento.");
+  return data.archived_at as string|null;
 }
 export async function removeEvent(id: string) {
   // Logical deletion preserves objects for recovery; documented manual retention/cleanup.

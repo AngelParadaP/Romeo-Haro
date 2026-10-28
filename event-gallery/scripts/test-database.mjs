@@ -182,14 +182,19 @@ await test('Members can open event contact but cannot enumerate or modify studio
 });
 await as(owner);
 await db.query("update public.events set uploads_open_at=now()-interval '49 hours',uploads_close_at=now()-interval '1 hour',archive_after_close=true where id=$1",[a]);
-await test('Owner retains an expired event while automatic archive revokes guests immediately',async()=>{
+await test('Automatic archive allows guest reading and downloads but forbids uploads and reactions immediately',async()=>{
   assert.equal((await db.query('select * from public.events where id=$1',[a])).rows.length,1);
   await assert.rejects(()=>db.query('select app_private.archive_expired_events()'));
   await as(guest);
-  assert.equal((await db.query('select * from public.events where id=$1',[a])).rows.length,0);
-  assert.equal((await db.query('select * from public.photos where event_id=$1',[a])).rows.length,0);
-  await assert.rejects(()=>db.query('select public.join_event($1)',[a]));
-  await assert.rejects(()=>db.query('select * from public.download_page($1)',[a]));
+  assert.equal((await db.query('select * from public.events where id=$1',[a])).rows.length,1);
+  assert.equal((await db.query('select * from public.photos where event_id=$1',[a])).rows.length,13);
+  await db.query('select public.join_event($1)',[a]);
+  assert.equal((await db.query('select * from public.download_page($1)',[a])).rows.length,13);
+  assert.equal((await db.query('select public.gallery_page($1,1,true) as result',[a])).rows[0].result.total,1);
+  assert.equal((await db.query('select app_private.can_upload_event($1) as allowed',[a])).rows[0].allowed,false);
+  await assert.rejects(()=>db.query('insert into public.photo_likes(photo_id) values ($1)', ['40000000-0000-4000-8000-000000000002']));
+  await assert.rejects(()=>db.query('insert into public.photo_favorites(photo_id) values ($1)', ['40000000-0000-4000-8000-000000000002']));
+  assert.equal((await db.query('delete from public.photo_favorites where photo_id=$1 returning *',[photo])).rows.length,0);
   await assert.rejects(()=>db.query('select app_private.archive_expired_events()'));
 });
 await db.exec('reset role');
@@ -199,6 +204,36 @@ await test('Archive worker persists the change once and preserves photos and oth
   assert.equal((await db.query('select active from public.events where id=$1',[a])).rows[0].active,false);
   assert.equal((await db.query('select active from public.events where id=$1',[b])).rows[0].active,true);
   assert.equal(Number((await db.query('select count(*) as count from public.photos where event_id=$1',[a])).rows[0].count),13);
+});
+await test('Cron records the original closing time, metadata edits do not extend the consultation',async()=>{
+  const result=(await db.query('select archived_at=uploads_close_at as same from public.events where id=$1',[a])).rows[0];assert.equal(result.same,true);
+  await as(owner);
+  const before=(await db.query('select archived_at from public.events where id=$1',[a])).rows[0].archived_at;
+  await db.query("update public.events set title='Boda editada' where id=$1",[a]);
+  assert.equal(String((await db.query('select archived_at from public.events where id=$1',[a])).rows[0].archived_at),String(before));
+  await assert.rejects(()=>db.query('update public.events set archived_at=now() where id=$1',[a]));
+});
+await test('Database consultation boundary is inclusive at archive and exclusive exactly 720 hours later',async()=>{
+  await db.exec('reset role');
+  const result=(await db.query(`select
+    app_private.event_guest_readable(jsonb_populate_record(null::public.events,jsonb_build_object('active',false,'archived_at',now()-interval '720 hours'+interval '1 millisecond'))) as before,
+    app_private.event_guest_readable(jsonb_populate_record(null::public.events,jsonb_build_object('active',false,'archived_at',now()-interval '720 hours'))) as deadline`)).rows[0];
+  assert.equal(result.before,true);assert.equal(result.deadline,false);
+});
+await test('Thirty-day expiry revokes event, photo, cover and download access before and after Cron',async()=>{
+  await as(owner);await db.query("update public.events set active=true,uploads_open_at=now()-interval '34 days',uploads_close_at=now()-interval '31 days' where id=$1",[a]);
+  for(const persisted of [false,true]){
+    if(persisted){await db.exec('reset role');await db.query('select app_private.archive_expired_events()');}
+    await as(guest);
+    assert.equal((await db.query('select * from public.events where id=$1',[a])).rows.length,0);
+    assert.equal((await db.query('select * from public.photos where event_id=$1',[a])).rows.length,0);
+    assert.equal((await db.query('select * from storage.objects')).rows.length,0);
+    await assert.rejects(()=>db.query('select public.join_event($1)',[a]));
+    await assert.rejects(()=>db.query('select public.gallery_page($1)',[a]));
+    await assert.rejects(()=>db.query('select * from public.download_page($1)',[a]));
+    await assert.rejects(()=>db.query('select public.event_contact($1)',[a]));
+  }
+  await as(owner);assert.equal((await db.query('select public.gallery_page($1) as result',[a])).rows[0].result.total,13);
 });
 await as(owner);await db.query('update public.events set active=true,archive_after_close=false,uploads_open_at=null,uploads_close_at=null where id=$1',[a]);
 await as(outsider);
@@ -219,20 +254,31 @@ await test('Invited user sees likes but not another guest’s favorites', async 
 await as(owner);
 await db.query('update public.events set active=false where id=$1 returning id', [a]);
 await as(guest);
-await test('Archiving revokes gallery reads, uploads and reactions', async () => {
-  assert.equal((await db.query('select * from public.photos')).rows.length, 0);
-  await assert.rejects(()=>db.query('select * from public.download_page($1)',[a]));
-  await assert.rejects(()=>db.query('select public.event_contact($1)',[a]));
-  assert.equal((await db.query('select * from storage.objects')).rows.length, 0);
-  await assert.rejects(() => db.query('select public.join_event($1)', [a]));
-  await assert.rejects(() => db.query('insert into public.photo_likes(photo_id) values ($1)', [photo]));
-  assert.equal((await db.query('delete from storage.objects where name=$1 returning id', [path])).rows.length, 0);
+await test('Manual archive starts consultation, permits existing and new guests and prevents mutations',async()=>{
+  assert.equal((await db.query('select * from public.photos')).rows.length,13);
+  assert.equal((await db.query('select * from public.download_page($1)',[a])).rows.length,13);
+  assert.equal((await db.query('select * from public.download_page($1,null,now(),true)',[a])).rows.length,1);
+  await db.query('select public.event_contact($1)',[a]);await db.query('select public.join_event($1)',[a]);
+  assert.equal((await db.query('select app_private.can_upload_event($1) as allowed',[a])).rows[0].allowed,false);
+  await assert.rejects(()=>db.query("insert into storage.objects(bucket_id,name) values ('event-photos',$1)",[`${a}/${guest}/60000000-0000-4000-8000-000000000099.jpg`]));
+  await assert.rejects(()=>db.query('insert into public.photo_likes(photo_id) values ($1)',['40000000-0000-4000-8000-000000000002']));
+  assert.equal((await db.query('delete from public.photo_likes where photo_id=$1 returning *',[photo])).rows.length,0);
+  assert.equal((await db.query('delete from storage.objects where name=$1 returning id',[path])).rows.length,0);
+  await as(owner2);await db.query('select public.join_event($1)',[a]);
+  assert.equal((await db.query('select public.gallery_page($1) as result',[a])).rows[0].result.total,13);
+  await as(owner);assert.equal((await db.query('select archived_at is not null as stamped from public.events where id=$1',[a])).rows[0].stamped,true);
 });
 await as(owner);
 await test('Owner can read archived gallery and retire event', async () => {
   assert.equal((await db.query('select public.gallery_page($1) as result', [a])).rows[0].result.total, 13);
   assert.equal((await db.query('update public.events set deleted_at=now(), active=false where id=$1 returning id', [a])).rows.length, 1);
   assert.equal((await db.query('select * from public.events where id=$1', [a])).rows.length, 0);
+});
+await as(guest);
+await test('Retirement immediately closes consultation without deleting photos',async()=>{
+  await assert.rejects(()=>db.query('select public.join_event($1)',[a]));
+  await assert.rejects(()=>db.query('select public.gallery_page($1)',[a]));
+  assert.equal((await db.query('select * from storage.objects')).rows.length,0);
 });
 await db.exec("reset role; set role anon;");
 await test('Unauthenticated API requests cannot read or invoke gallery functions', async () => {

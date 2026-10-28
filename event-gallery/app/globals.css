@@ -23,3 +23,8 @@ html{min-height:100%;overflow-x:clip;overscroll-behavior-y:none}body{min-height:
 @media(max-width:480px){.access-shell{padding-left:16px;padding-right:16px}.access-card{padding:28px 20px;border-radius:14px}.access-card h1{font-size:30px;line-height:1.15;letter-spacing:-1px}.access-card .brand{margin-bottom:28px}.access-card form{margin:22px 0;gap:16px}.access-card input{font-size:16px}.access-card .primary{width:100%}.access-card .eyebrow{font-size:8px;letter-spacing:1.2px}}
 @media(max-width:360px){.access-shell{padding-left:10px;padding-right:10px}.access-card{padding:24px 14px}}
 @media(max-height:600px){.access-shell{align-items:flex-start}.access-card{margin:0 auto}}
+
+/* An explicit positioned image box keeps percentage height and crop reliable on mobile Safari. */
+.event-picture>.cover-image{position:absolute;inset:0;width:100%;height:100%;max-width:none;object-fit:cover}
+.archive-deadline{font-size:12px!important;color:var(--green)!important;line-height:1.7;font-weight:500}
+.photo-card button:disabled{opacity:.5;cursor:default}

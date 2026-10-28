@@ -53,3 +53,18 @@ export function uploadWindow(opening:string,closing:string,mode:ClosingMode){
 export function isEventActive(event:GalleryEvent,now=Date.now()){
   return event.active&&!(event.archiveAfterClose&&event.uploadsCloseAt&&now>=Date.parse(event.uploadsCloseAt));
 }
+
+// A month of consultation is a fixed 30-day window, identical to PostgreSQL.
+export const archiveConsultationMs=30*24*60*60*1000;
+export function eventArchivedAt(event:GalleryEvent,now=Date.now()):string|null {
+  if(!event.active)return event.archivedAt||null;
+  return event.archiveAfterClose&&event.uploadsCloseAt&&now>=Date.parse(event.uploadsCloseAt)?event.uploadsCloseAt:null;
+}
+export function guestAccessUntil(event:GalleryEvent,now=Date.now()):string|null {
+  const archived=eventArchivedAt(event,now);
+  return archived?new Date(Date.parse(archived)+archiveConsultationMs).toISOString():null;
+}
+export function canGuestView(event:GalleryEvent,now=Date.now()) {
+  const deadline=guestAccessUntil(event,now);
+  return deadline?now<Date.parse(deadline):isEventActive(event,now);
+}

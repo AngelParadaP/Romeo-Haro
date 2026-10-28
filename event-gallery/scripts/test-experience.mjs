@@ -11,7 +11,7 @@ async function loadTS(path){
   return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
 }
 const {buildPhotoArchives}=await loadTS('../lib/archives.ts');
-const {uploadStatus,matchesEvent,rememberGuest,rememberedGuest,sortEvents,monthDays,cropFromDrag,openingFromEventDate,defaultClosingMode,uploadWindow,isEventActive}=await loadTS('../lib/event-utils.ts');
+const {uploadStatus,matchesEvent,rememberGuest,rememberedGuest,sortEvents,monthDays,cropFromDrag,openingFromEventDate,defaultClosingMode,uploadWindow,isEventActive,canGuestView,eventArchivedAt,guestAccessUntil,archiveConsultationMs}=await loadTS('../lib/event-utils.ts');
 const store=new Map();globalThis.localStorage={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)};
 rememberGuest('event-a','user-a','Ana');
 assert.equal(rememberedGuest('event-a','user-a'),'Ana');
@@ -64,3 +64,15 @@ assert.equal(isEventActive({...event,archiveAfterClose:true,uploadsCloseAt:windo
 assert.equal(isEventActive({...event,archiveAfterClose:true,uploadsCloseAt:window48.end},Date.parse(window48.end)),false);
 assert.equal(isEventActive({...event,archiveAfterClose:false,uploadsCloseAt:window48.end},Date.parse(window48.end)),true);
 console.log('✓ Event date seeds editable opening, new events default to 48h and archive exactly at deadline');
+
+const archived={...event,active:false,archivedAt:'2026-10-27T15:30:00Z'};
+const expires=Date.parse(archived.archivedAt)+archiveConsultationMs;
+assert.equal(canGuestView(archived,expires-1),true);assert.equal(canGuestView(archived,expires),false);
+assert.equal(uploadStatus(archived,expires-1),'closed');
+assert.equal(guestAccessUntil(archived),'2026-11-26T15:30:00.000Z');
+const automatic={...scheduled,archiveAfterClose:true};
+assert.equal(eventArchivedAt(automatic,close-1),null);assert.equal(eventArchivedAt(automatic,close),scheduled.uploadsCloseAt);
+assert.equal(canGuestView(automatic,close+archiveConsultationMs-1),true);assert.equal(canGuestView(automatic,close+archiveConsultationMs),false);
+assert.equal(canGuestView({...event,active:false},open),false);
+assert.equal(canGuestView({...archived,active:true},expires),true);
+console.log('✓ Manual and automatic archives allow 30 days of read-only consultation with exact expiry boundaries');

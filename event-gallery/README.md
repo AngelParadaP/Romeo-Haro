@@ -236,3 +236,19 @@ El archivo conserva las fotos y el acceso del propietario, y cierra el acceso de
 Las políticas RLS retiran el acceso de invitados exactamente al vencer el plazo, aunque el trabajo de Cron todavía no haya actualizado `active`. El panel también reconoce el plazo vencido; Cron persiste el estado archivado. La nueva marca `archive_after_close` queda desactivada en eventos existentes para no cambiar su acceso sin editar sus ajustes.
 
 El login usa centrado adaptable al viewport móvil, márgenes seguros, campos sin desbordamiento y CAPTCHA compacto cuando no cabe el formato flexible. En pantallas bajas permite desplazar el formulario.
+
+## Archivo con consulta durante 30 días (sustituye el cierre inmediato de 006)
+
+Si ya aplicaste las migraciones 001–006, ejecuta **solo** `supabase/migrations/202610270007_archive_read_only.sql` en el SQL Editor de Supabase **antes de desplegar** el código nuevo en Vercel. Si falta 006, aplícala primero. No requiere nuevas variables ni otro trabajo Cron: se conserva el archivo automático existente y la caducidad de consulta la aplican las políticas RLS en cada petición.
+
+- **Activo:** mantiene los permisos y horarios de subida configurados.
+- **Archivado:** invitados existentes y nuevos con el enlace pueden consultar y descargar, incluidas sus selecciones previas de favoritos y los ZIP. No pueden subir fotos ni añadir/quitar reacciones o favoritos. El fotógrafo conserva sus permisos.
+- **30 días después del archivo:** se cierran las nuevas consultas y descargas de invitados, tanto desde la interfaz como por API/RLS, incluidos originales y portadas en Storage. El propietario conserva acceso. La galería muestra el vencimiento y las tarjetas del estudio indican cuándo terminó la consulta.
+
+Un mes se define aquí como **30 días exactos (720 horas)**. `archived_at` lo registra un trigger de PostgreSQL; el navegador no tiene permiso para modificarlo. Para el archivo automático se usa `uploads_close_at`, incluso si Cron se ejecuta con retraso. Para el manual se usa la hora del servidor al desactivar el evento. Editar el título, portada u otros datos de un evento ya archivado no reinicia el plazo. Reactivar elimina la marca de archivo; para volver a abrir subidas también hay que ajustar un cierre vencido o desactivar su archivo automático.
+
+Los eventos que ya estaban archivados manualmente no tienen fecha histórica recuperable: su plazo comienza al aplicar 007. Los archivados automáticamente toman su fecha de cierre original; si esta fue hace más de 30 días, su consulta ya habrá vencido. «Retirar evento» sigue cerrando inmediatamente todo acceso de invitados, sin esperar los 30 días.
+
+**Retención de archivos:** caducar el acceso no borra imágenes ni libera espacio. Este ajuste deja la eliminación bajo control del fotógrafo/administrador para hacer limpieza después de entregar y respaldar el material. Al limpiar, deben retirarse los objetos de `event-photos` y las portadas de `event-covers` mediante la API de Storage, además de sus registros relacionados; borrar únicamente filas de PostgreSQL no elimina los archivos del bucket. Las URL firmadas ya emitidas pueden funcionar hasta su vencimiento (actualmente hasta 15 minutos); las fotos que alguien ya descargó quedan fuera del control de la web.
+
+La portada de invitados ahora tiene dimensiones y posición absolutas dentro de su contenedor: el navegador móvil usa la altura completa de la portada y respeta `cover_x`, `cover_y` y `cover_zoom`. El formato de pantalla sigue cambiando cuánto se recorta por `object-fit: cover`; conserva el punto de encuadre y el zoom, sin deformar la fotografía. Verificado en navegador a 390 px con encuadre personalizado y en PostgreSQL con autenticación/Storage simulados. También conviene revisar la portada final en el iPhone de uso real.

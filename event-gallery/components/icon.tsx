@@ -24,6 +24,7 @@ const paths = {
   clock:<><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></>,
   check:<path d="m4 12 5 5L20 6"/>,
   qr:<><path d="M3 3h7v7H3zm11 0h7v7h-7zM3 14h7v7H3zm11 0h3v3h4v4h-7zm7-1v1"/></>,
+  trash:<><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></>,
   refresh:<><path d="M20 8a8 8 0 0 0-14-3L3 8m0-5v5h5M4 16a8 8 0 0 0 14 3l3-3m0 5v-5h-5"/></>,
   sort:<><path d="M7 3v18m-4-4 4 4 4-4M15 4h6m-6 5h5m-5 5h4"/></>,
 } satisfies Record<string, React.ReactNode>;

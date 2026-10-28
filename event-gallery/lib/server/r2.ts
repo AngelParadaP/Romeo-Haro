@@ -22,3 +22,14 @@ export async function putR2(key:string,body:Blob){await send('PUT',key,body);}
 export async function deleteR2(key:string){await send('DELETE',key);}
 export async function readR2URL(key:string){const url=new URL(objectURL(key));url.searchParams.set('X-Amz-Expires','900');return (await client().sign(url,{method:'GET',aws:{signQuery:true}})).url;}
 export async function checkR2(){const url=new URL(objectURL());url.searchParams.set('list-type','2');url.searchParams.set('max-keys','1');const request=await client().sign(url,{method:'GET'});const response=await fetch(request,{signal:AbortSignal.timeout(15000)});if(!response.ok)throw new StorageError('No se pudo acceder al bucket de R2. Revisa su nombre y el token con permisos de lectura y escritura.',503);}
+
+export async function listR2(prefix:string):Promise<string[]>{
+ const keys:string[]=[];let continuation='';
+ const decode=(s:string)=>s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'");
+ do{const url=new URL(objectURL());url.searchParams.set('list-type','2');url.searchParams.set('prefix',prefix);url.searchParams.set('max-keys','1000');if(continuation)url.searchParams.set('continuation-token',continuation);
+ const response=await fetch(await client().sign(url),{signal:AbortSignal.timeout(15000)});if(!response.ok)throw new StorageError('No se pudieron enumerar los archivos de R2. La limpieza queda pendiente.',503);
+ const xml=await response.text();for(const match of xml.matchAll(/<Key>([\s\S]*?)<\/Key>/g)){const key=decode(match[1]);if(!key.startsWith(prefix))throw new StorageError('R2 devolvió un archivo fuera del evento.',503);keys.push(key);}
+ const more=/<IsTruncated>true<\/IsTruncated>/.test(xml);const next=xml.match(/<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/)?.[1];if(more&&!next)throw new StorageError('No se pudo completar el listado de R2.',503);continuation=more?decode(next!):'';
+ }while(continuation);
+ return keys;
+}

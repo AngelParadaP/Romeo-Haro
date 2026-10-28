@@ -329,6 +329,71 @@ await test('Retirement immediately closes consultation without deleting photos',
     assert.equal((await db.query("select public.drive_access($1,'event-photos',false) as allowed",[path])).rows[0].allowed,false);
   assert.equal((await db.query('select * from storage.objects')).rows.length,0);
 });
+const deleteEvent='70000000-0000-4000-8000-000000000001';
+const deletePhoto='71000000-0000-4000-8000-000000000001';
+const deletePath=`${deleteEvent}/${guest}/${deletePhoto}.jpg`;
+const claim='72000000-0000-4000-8000-000000000001';let photoJob,eventJob;
+await as(owner);await db.query("insert into public.events(id,title,date,category,cover) values ($1,'Eliminar prueba','2026-11-14','Boda','https://example.com/test.jpg')",[deleteEvent]);
+await db.exec('reset role');
+await db.query("insert into storage.objects(bucket_id,name) values ('event-photos',$1)",[deletePath]);
+await db.query("insert into public.r2_objects(bucket,path,object_key,event_id,uploader_id,size_bytes) values ('event-photos',$1,$2,$3,$4,20)",[deletePath,`event-photos/${deletePath}`,deleteEvent,guest]);
+await db.query("insert into public.photos(id,event_id,author_id,author,storage_path,storage_provider) values ($1,$2,$3,'Ana',$4,'r2')",[deletePhoto,deleteEvent,guest,deletePath]);
+await as(guest);await db.query('select public.join_event($1)',[deleteEvent]);
+await db.query('insert into public.photo_likes(photo_id) values ($1)',[deletePhoto]);await db.query('insert into public.photo_favorites(photo_id) values ($1)',[deletePhoto]);
+await test('Guests and other photographers cannot request permanent deletion or access the queue',async()=>{
+ await assert.rejects(()=>db.query('select public.begin_deletion($1,$2)',[deleteEvent,deletePhoto]));
+ await assert.rejects(()=>db.query('select * from public.deletion_jobs'));
+ await assert.rejects(()=>db.query('select public.claim_deletion($1,$2)',[deleteEvent,claim]));
+ await assert.rejects(()=>db.query('delete from public.photos where id=$1',[deletePhoto]));
+ await as(owner2);await assert.rejects(()=>db.query('select public.begin_deletion($1)',[deleteEvent]));
+});
+await as(owner);
+await test('Photo deletion is idempotent and immediately removes gallery, reaction and storage access',async()=>{
+ photoJob=(await db.query('select public.begin_deletion($1,$2) as id',[deleteEvent,deletePhoto])).rows[0].id;
+ assert.equal((await db.query('select public.begin_deletion($1,$2) as id',[deleteEvent,deletePhoto])).rows[0].id,photoJob);
+ assert.equal((await db.query('select public.gallery_page($1) as result',[deleteEvent])).rows[0].result.total,0);
+ await as(guest);
+ assert.equal((await db.query("select public.storage_access($1,'event-photos','r2',false) as allowed",[deletePath])).rows[0].allowed,false);
+ assert.equal((await db.query('select app_private.storage_access($1,false) as allowed',[deletePath])).rows[0].allowed,false);
+ assert.equal((await db.query('select * from public.photo_favorites where photo_id=$1',[deletePhoto])).rows.length,0);
+ await assert.rejects(()=>db.query('select public.finish_deletion($1,$2)',[photoJob,claim]));
+});
+await db.exec('reset role;set role service_role');
+await test('Database cannot finalize deletion before all files are acknowledged',async()=>{
+ assert.equal((await db.query('select * from public.claim_deletion($1,$2)',[photoJob,claim])).rows.length,1);
+ await assert.rejects(()=>db.query('select public.finish_deletion($1,$2)',[photoJob,claim]));
+ await db.query(`update public.deletion_jobs set manifest='[{"provider":"r2"}]'::jsonb where id=$1`,[photoJob]);
+ await assert.rejects(()=>db.query('select public.finish_deletion($1,$2)',[photoJob,claim]));
+ await db.query('update public.deletion_jobs set cursor=1 where id=$1',[photoJob]);
+ await db.query('select public.finish_deletion($1,$2)',[photoJob,claim]);
+});
+await db.exec('reset role');
+await test('Completed photo deletion cascades reactions/favorites and removes the private registry and job',async()=>{
+ for(const table of ['photos','photo_likes','photo_favorites'])assert.equal(Number((await db.query(`select count(*) as n from public.${table} where ${table==='photos'?'id':'photo_id'}=$1`,[deletePhoto])).rows[0].n),0);
+ assert.equal(Number((await db.query('select count(*) as n from public.r2_objects where path=$1',[deletePath])).rows[0].n),0);
+ assert.equal(Number((await db.query('select count(*) as n from public.deletion_jobs where id=$1',[photoJob])).rows[0].n),0);
+ assert.equal(Number((await db.query('select count(*) as n from public.events where id=$1',[deleteEvent])).rows[0].n),1);
+});
+await as(guest);const uploadLease='73000000-0000-4000-8000-000000000001';const leasePath=`${deleteEvent}/${guest}/${uploadLease}.jpg`;
+await db.query("select public.begin_upload_lease($1,$2,$3,'event-photos','r2')",[uploadLease,deleteEvent,leasePath]);
+await as(owner);eventJob=(await db.query('select public.begin_deletion($1) as id',[deleteEvent])).rows[0].id;
+await test('Event deletion waits for in-flight uploads and rejects new admissions',async()=>{
+ await as(guest);await assert.rejects(()=>db.query("select public.begin_upload_lease($1,$2,$3,'event-photos','r2')",[claim,deleteEvent,leasePath]));
+ await db.exec('reset role;set role service_role');assert.equal((await db.query('select * from public.claim_deletion($1,$2)',[eventJob,claim])).rows.length,0);
+ await db.query("update public.storage_upload_leases set expires_at=now()-interval '1 second' where id=$1",[uploadLease]);
+ assert.equal((await db.query('select * from public.claim_deletion($1,$2)',[eventJob,claim])).rows.length,1);
+});
+await test('Completed event cleanup removes event, guests, expired leases and queue without touching other events',async()=>{
+ await db.query("update public.deletion_jobs set manifest='[]'::jsonb where id=$1",[eventJob]);await db.query('select public.finish_deletion($1,$2)',[eventJob,claim]);
+ await db.exec('reset role');
+ for(const table of ['events','event_guests','storage_upload_leases','deletion_jobs'])assert.equal(Number((await db.query(`select count(*) as n from public.${table} where ${table==='events'?'id':'event_id'}=$1`,[deleteEvent])).rows[0].n),0);
+ assert.equal(Number((await db.query('select count(*) as n from public.events where id=$1',[b])).rows[0].n),1);
+});
+await as(owner);
+await test('Previously retired events can enter permanent cleanup without reopening access',async()=>{
+ const result=await db.query('select public.begin_deletion($1) as id',[a]);assert.ok(result.rows[0].id);
+ await as(guest);assert.equal((await db.query('select * from public.events where id=$1',[a])).rows.length,0);
+});
 await db.exec("reset role; set role anon;");
 await test('Unauthenticated API requests cannot read or invoke gallery functions', async () => {
   await assert.rejects(() => db.query('select * from public.events'));

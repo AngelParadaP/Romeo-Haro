@@ -270,3 +270,9 @@ Sigue [la guía de instalación de Google Drive](docs/google-drive.md) para conf
 Selecciona `NEXT_PUBLIC_STORAGE_PROVIDER=r2`, aplica **009** después de **008** y configura el bucket privado y las cuatro credenciales `R2_*`, además de la clave de servidor de Supabase. No requiere OAuth ni variables de Google. Se mantiene la lectura de archivos históricos de Supabase y Drive, con los permisos y las descargas existentes.
 
 Sigue [la guía de Cloudflare R2](docs/cloudflare-r2.md). El código no mueve ni elimina automáticamente archivos anteriores. Pruebas: `npm run test:storage` (el alias `test:drive` se conserva para compatibilidad).
+
+## Eliminación permanente con limpieza de archivos
+
+Aplica **010 después de 009 antes de desplegar**. El fotógrafo propietario puede eliminar una fotografía desde la papelera o un evento desde su editor. Se eliminan archivos de R2/Supabase/Drive y luego registros y relaciones; una cola privada conserva el avance si ocurre un fallo. El panel permite reintentar y revisar eventos retirados anteriormente. Archivar sigue conservando archivos.
+
+Consulta [el funcionamiento y los pasos de activación](docs/eliminacion.md). Los archivos históricos de Drive necesitan sus credenciales para borrarse; no se elimina nada automáticamente al instalar esta migración.

@@ -34,3 +34,6 @@ html{min-height:100%;overflow-x:clip;overscroll-behavior-y:none}body{min-height:
 
 .cover-notice{display:flex;gap:16px;align-items:center;justify-content:space-between;background:#f1eddf;border:1px solid #e2dac5;padding:14px 18px;border-radius:8px;margin-bottom:18px;font-size:12px;line-height:1.6}.event-info>.cover-notice-text{color:#8b704d;line-height:1.6}.cover-notice .secondary{flex-shrink:0}
 @media(max-width:760px){.cover-notice{flex-direction:column;align-items:stretch;gap:10px}}
+
+.photo-card .delete-photo{color:#a45245}.photo-card .delete-photo:hover{background:#faece7}.deletion-pending{border:1px solid #dfc8b2;background:#f5eee3;padding:18px;border-radius:9px;margin-bottom:24px;display:flex;gap:20px;align-items:center;justify-content:space-between}.deletion-pending b{font-size:13px}.deletion-pending p{font-size:11px;line-height:1.6;overflow-wrap:anywhere}.deletion-pending>.secondary{flex-shrink:0}.lightbox-delete{position:absolute;bottom:15px;right:25px;color:#9a493d}.lightbox:has(.lightbox-delete) .lightbox-download{left:25px}
+@media(max-width:760px){.deletion-pending{flex-direction:column;align-items:stretch;gap:10px}.lightbox-delete{right:15px;font-size:10px;padding:10px}.lightbox:has(.lightbox-delete) .lightbox-download{left:15px;font-size:10px;padding:10px}}

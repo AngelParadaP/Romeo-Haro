@@ -3,7 +3,7 @@ import {authenticated,allowedStorage,driveEnabled,r2Enabled,fail,privateJSON,ser
 import {putR2,deleteR2} from '@/lib/server/r2';
 import {connection,accessToken,eventFolder,uploadJPEG,trash} from '@/lib/server/google-drive';
 export const maxDuration=60;
-export async function POST(request:Request){let uploaded:string|undefined;let token:string|undefined;let path:string|undefined;let bucket:string|undefined;let registered=false;let uncertainPublication=false;const provider=r2Enabled()?'r2':'google-drive';const registryTable=provider==='r2'?'r2_objects':'drive_objects';
+export async function POST(request:Request){let uploaded:string|undefined;let token:string|undefined;let path:string|undefined;let bucket:string|undefined;let registered=false;let uncertainPublication=false;const provider=r2Enabled()?'r2':'google-drive';let uploadLease:string|undefined;let safeToRelease=false;const registryTable=provider==='r2'?'r2_objects':'drive_objects';
  try{
   if(!driveEnabled()&&!r2Enabled())throw new StorageError('El almacenamiento externo no está activado.',503);
   const {db,user}=await authenticated(request);const url=new URL(request.url);bucket=url.searchParams.get('bucket')||'';const eventId=url.searchParams.get('eventId')||'';
@@ -22,11 +22,13 @@ export async function POST(request:Request){let uploaded:string|undefined;let to
   const reader=request.body?.getReader();if(!reader)throw new StorageError('Falta la fotografía.');let size=0;const chunks:Uint8Array[]=[];
   for(;;){const next=await reader.read();if(next.done)break;size+=next.value.byteLength;if(size>max){await reader.cancel();throw new StorageError('La imagen supera 3 MB.',413);}chunks.push(next.value);}
   const bytes=Buffer.concat(chunks);if(bytes.length<4||bytes[0]!==255||bytes[1]!==216||bytes[2]!==255||bytes.at(-2)!==255||bytes.at(-1)!==217)throw new StorageError('La imagen JPG no es válida.');
+  const admission=await db.rpc('begin_upload_lease',{lease_token:id,event_token:eventId,target:path,kind:bucket,provider});if(admission.error)throw new StorageError('No se pudo autorizar la subida. Comprueba la migración 010 y el horario del evento.',409);uploadLease=id;
   if(provider==='r2'){uploaded=`${bucket}/${path}`;await putR2(uploaded,new Blob([bytes],{type:'image/jpeg'}));}
   else{const config=await connection();token=await accessToken(config);const parent=await eventFolder(token,config.root_folder_id,eventId);uploaded=await uploadJPEG(token,parent,`${bucket==='event-covers'?'portada':'foto'}-${id}.jpg`,new Blob([bytes],{type:'image/jpeg'}));}
+  const tracked=await serviceDB().from('storage_upload_leases').update({external_key:uploaded}).eq('id',uploadLease);if(tracked.error)throw new Error('upload-lease');
   // Recheck the database clock after a slow upload. Never publish after closure.
   await allowedStorage(db,path,bucket,provider,true);
-  const registry=await serviceDB().from(registryTable).insert({bucket,path,...(provider==='r2'?{object_key:uploaded}:{drive_file_id:uploaded}),event_id:eventId,uploader_id:user.id,size_bytes:bytes.length});if(registry.error)throw new Error('registry');registered=true;
+  const registry=await serviceDB().from(registryTable).insert({bucket,path,...(provider==='r2'?{object_key:uploaded}:{drive_file_id:uploaded}),event_id:eventId,uploader_id:user.id,size_bytes:bytes.length});if(registry.error)throw new Error('registry');registered=true;safeToRelease=true;
   if(bucket==='event-photos'){
    const inserted=await db.from('photos').insert({id,event_id:eventId,author_id:user.id,author,storage_path:path,storage_provider:provider});if(inserted.error){
     // A lost HTTP response does not prove the INSERT was rolled back.
@@ -38,7 +40,7 @@ export async function POST(request:Request){let uploaded:string|undefined;let to
   return privateJSON({id,path,provider});
  }catch(error){
   // Only files created by this request are eligible for failure cleanup.
-  if(uploaded&&!uncertainPublication&&(provider==='r2'||token)){try{if(provider==='r2')await deleteR2(uploaded);else await trash(token!,uploaded);if(registered&&path&&bucket)await serviceDB().from(registryTable).delete().eq('path',path).eq('bucket',bucket);}catch{/* Leave the registry for administrative recovery if cleanup fails. */}}
+  if(uploaded&&!uncertainPublication&&(provider==='r2'||token)){try{if(provider==='r2')await deleteR2(uploaded);else await trash(token!,uploaded);safeToRelease=true;if(registered&&path&&bucket)await serviceDB().from(registryTable).delete().eq('path',path).eq('bucket',bucket);}catch{/* Leave the registry for administrative recovery if cleanup fails. */}}
   return fail(error);
- }
+ }finally{if(uploadLease&&safeToRelease){try{await serviceDB().from('storage_upload_leases').delete().eq('id',uploadLease);}catch{ /* Expired leases are included in event cleanup. */ }}}
 }

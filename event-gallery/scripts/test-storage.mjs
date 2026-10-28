@@ -16,6 +16,7 @@ const owner='10000000-0000-4000-8000-000000000001',guest='20000000-0000-4000-800
 Object.assign(process.env,{NEXT_PUBLIC_STORAGE_PROVIDER:'google-drive',NEXT_PUBLIC_SUPABASE_URL:'https://db.example.test',NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:'sb_publishable_test',SUPABASE_SERVICE_ROLE_KEY:'sb_secret_test',APP_URL:'https://app.example.test',GOOGLE_DRIVE_OWNER_ID:owner,GOOGLE_DRIVE_CLIENT_ID:'client-test',GOOGLE_DRIVE_CLIENT_SECRET:'secret-test',DRIVE_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64')});
 const auth=await load('lib/server/storage-auth.ts');const {NextRequest}=require('next/server');
 const connection={owner_id:owner,refresh_token_encrypted:auth.seal({refreshToken:'refresh-test'}),root_folder_id:'folder-test',account_email:'dedicated@example.test'};
+let deletionJob=null,finishedJobs=0,failDelete=false,enumerating=false;
 let user=guest,allow=true,hasConnection=true,registered,photoInserted=false,trashed=0,linked=false,denyInsert=false;let count=0;
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
 const jpeg=new Uint8Array([255,216,255,224,0,0,255,217]);
@@ -23,17 +24,29 @@ globalThis.fetch=async(input,init={})=>{
  const incoming=input instanceof Request?input:undefined;const url=new URL(incoming?incoming.url:String(input));const method=init.method||incoming?.method||'GET';const body=typeof init.body==='string'?JSON.parse(init.body):null;
  if(url.hostname==='db.example.test'){
   if(url.pathname==='/auth/v1/user')return json({id:user,role:'authenticated'});
+  if(url.pathname.endsWith('/rpc/begin_deletion'))return json(deletionJob.id);
+  if(url.pathname.endsWith('/rpc/claim_deletion')){deletionJob.lease_token=body.claim_token;return json([deletionJob]);}
+  if(url.pathname.endsWith('/rpc/finish_deletion')){assert.ok(deletionJob.cursor>=deletionJob.manifest.length);deletionJob=null;finishedJobs++;return json(null);}
+  if(url.pathname.endsWith('/deletion_jobs')){if(method==='PATCH'){Object.assign(deletionJob,body);return json(null);}return json(deletionJob?{...deletionJob}:null);}
   if(url.pathname.endsWith('/rpc/is_admin'))return json(user===owner);
+  if(url.pathname.endsWith('/rpc/begin_upload_lease'))return json(null);
+  if(url.pathname.endsWith('/storage_upload_leases'))return json(enumerating?[]:null);
   if(url.pathname.endsWith('/rpc/storage_access'))return json(allow);
   if(url.pathname.endsWith('/rpc/drive_access'))return json(allow);
+  if(url.pathname.endsWith('/events')&&enumerating)return json({cover_provider:'supabase',cover_path:`${owner}/${event}/current.jpg`});
   if(url.pathname.endsWith('/events'))return json(new URLSearchParams(url.search).get('select')==='owner_id'?{owner_id:owner}:linked?[{id:event}]:[]);
   if(url.pathname.endsWith('/admin_users'))return json({user_id:owner});
   if(url.pathname.endsWith('/drive_connections'))return json(method==='GET'?(hasConnection?connection:null):null);
+  if(url.pathname.endsWith('/r2_objects')&&enumerating)return json([]);
+  if(url.pathname.endsWith('/drive_objects')&&enumerating)return json([]);
+  if(url.pathname.startsWith('/storage/v1/object/')&&method==='DELETE'){assert.equal(body.prefixes.length,1);return json([]);}
+  if(url.pathname.startsWith('/storage/v1/object/list/')&&enumerating){const prefix=body.prefix;return json([{id:'old-file',name:prefix.startsWith(owner)?'superseded.jpg':'orphan.jpg'}]);}
   if(url.pathname.endsWith('/r2_objects')){if(method==='POST'){registered=body;return json(null,201);}if(method==='DELETE'){registered=undefined;return json(null);}return json({object_key:`${url.searchParams.get('bucket')?.slice(3)||'event-photos'}/${url.searchParams.get('path')?.slice(3)||objectPath}`});}
   if(url.pathname.endsWith('/drive_objects')){if(method==='POST'){registered=body;return json(null,201);}if(method==='DELETE'){registered=undefined;return json(null);}return json({drive_file_id:'file-test'});}
-  if(url.pathname.endsWith('/photos')){if(method==='GET')return json(null);if(denyInsert)return json({code:'42501',message:'closed'},403);photoInserted=true;return json(null,201);}
+  if(url.pathname.endsWith('/photos')&&enumerating)return json([]);
+  if(url.pathname.endsWith('/photos')){if(method==='GET')return json(deletionJob?.photo_id?{storage_provider:'r2',storage_path:objectPath}:null);if(denyInsert)return json({code:'42501',message:'closed'},403);photoInserted=true;return json(null,201);}
  }
- if(url.hostname.endsWith('.r2.cloudflarestorage.com')){assert.ok(incoming.headers.get('Authorization')?.startsWith('AWS4-HMAC-SHA256'));assert.equal(incoming.headers.get('Authorization')?.includes('user-token'),false);if(method==='DELETE'){trashed++;return new Response(null,{status:204});}return new Response(method==='GET'?'<ListBucketResult/>':'',{status:200});}
+ if(url.hostname.endsWith('.r2.cloudflarestorage.com')){assert.ok(incoming.headers.get('Authorization')?.startsWith('AWS4-HMAC-SHA256'));assert.equal(incoming.headers.get('Authorization')?.includes('user-token'),false);if(method==='DELETE'){if(failDelete)return new Response('Unavailable',{status:503});trashed++;return new Response(null,{status:204});}if(enumerating&&method==='GET'){const prefix=url.searchParams.get('prefix');return new Response(`<ListBucketResult><Contents><Key>${prefix}orphan.jpg</Key></Contents><IsTruncated>false</IsTruncated></ListBucketResult>`);}return new Response(method==='GET'?'<ListBucketResult/>':'',{status:200});}
  if(url.hostname==='oauth2.googleapis.com')return json({access_token:'access-test',refresh_token:'refresh-test',scope:'https://www.googleapis.com/auth/drive.file'});
  if(url.hostname==='www.googleapis.com'){
   if(url.pathname.includes('/upload/')){assert.ok(init.body instanceof Blob);return json({id:'file-test'});}
@@ -76,4 +89,14 @@ await test('R2 media URLs are signed for one private object and expire after 15 
 await test('R2 downloads authorize first, then redirect directly to private storage',async()=>{const response=await file.GET(request(`file?${new URLSearchParams({bucket:'event-photos',path:objectPath,provider:'r2'})}`));assert.equal(response.status,302);assert.ok(response.headers.get('Location').includes('X-Amz-Signature'));allow=false;assert.equal((await file.GET(request(`file?${new URLSearchParams({bucket:'event-photos',path:objectPath,provider:'r2'})}`))).status,403);allow=true;});
 await test('R2 credentials are checked only for photographers',async()=>{const status=await load('app/api/storage/status/route.ts');assert.equal((await status.GET(request('status'))).status,403);user=owner;const response=await status.GET(request('status'));assert.equal(response.status,200);assert.equal((await response.json()).provider,'r2');});
 await test('R2 cleanup cannot delete linked event covers',async()=>{linked=true;const before=trashed;const response=await file.DELETE(request('file',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'r2',path:`${owner}/${event}/40000000-0000-4000-8000-000000000001.jpg`})}));assert.equal(response.status,409);assert.equal(trashed,before);});
+const deletion=await load('app/api/deletions/route.ts');
+const jobId='80000000-0000-4000-8000-000000000001';
+const newJob=(manifest=null)=>({id:jobId,owner_id:owner,event_id:event,photo_id:'40000000-0000-4000-8000-000000000001',title:'Prueba',manifest,cursor:0,last_error:null});
+await test('Guests cannot invoke physical deletion',async()=>{user=guest;const before=trashed;const response=await deletion.POST(request('deletions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({eventId:event})}));assert.equal(response.status,403);assert.equal(trashed,before);user=owner;});
+await test('A photographer cannot process another owner’s deletion job',async()=>{deletionJob={...newJob(),owner_id:guest};const before=trashed;const response=await deletion.POST(request('deletions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})}));assert.equal(response.status,403);assert.equal(trashed,before);});
+await test('A failed physical delete retains the job and metadata for retry',async()=>{deletionJob=newJob([{provider:'r2',bucket:'event-photos',path:objectPath,key:`event-photos/${objectPath}`}]);failDelete=true;const before=finishedJobs;const response=await deletion.POST(request('deletions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})}));assert.equal(response.status,502);assert.equal(deletionJob.cursor,0);assert.ok(deletionJob.last_error);assert.equal(finishedJobs,before);failDelete=false;});
+await test('Retry completes storage deletion before database finalization',async()=>{const response=await deletion.POST(request('deletions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})}));assert.equal(response.status,200);assert.equal((await response.json()).done,true);assert.equal(deletionJob,null);});
+await test('Large cleanups persist progress between bounded requests',async()=>{deletionJob=newJob(Array.from({length:9},(_,i)=>({provider:'r2',bucket:'event-photos',path:objectPath,key:`event-photos/${objectPath}-${i}`})));const first=await deletion.POST(request('deletions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})}));assert.equal((await first.json()).done,false);assert.equal(deletionJob.cursor,8);const second=await deletion.POST(request('deletions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})}));assert.equal((await second.json()).done,true);});
+await test('Event manifests include superseded covers and unlinked objects from physical prefixes',async()=>{enumerating=true;const worker=await load('lib/server/deletion.ts');const manifest=await worker.deletionManifest({...newJob(),photo_id:null});assert.ok(manifest.some(item=>item.provider==='r2'&&item.key===`event-photos/${event}/orphan.jpg`));assert.ok(manifest.some(item=>item.provider==='supabase'&&item.path===`${owner}/${event}/superseded.jpg`));assert.ok(manifest.every(item=>item.provider==='supabase'||item.key.startsWith('event-photos/'+event+'/')||item.key.startsWith('event-covers/'+owner+'/'+event+'/')));enumerating=false;});
+await test('Legacy Supabase files are removed through the Storage API',async()=>{const worker=await load('lib/server/deletion.ts');await worker.removeStoredItem({provider:'supabase',bucket:'event-photos',path:objectPath});});
 console.log(`\n${count} storage route/security checks passed (R2 and legacy Drive, mocked services).`);

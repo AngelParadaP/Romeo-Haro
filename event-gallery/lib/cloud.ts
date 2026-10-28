@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { GalleryEvent, Photo, StudioContact, StorageProvider } from "./types";
 import {driveURLs,driveUpload,uploadProvider,storageRequest} from "./storage-client";
+import {deleteResource} from "./deletions";
 import {mapsLink} from "./maps";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -76,11 +77,10 @@ export async function persistEvent(event: GalleryEvent, exists: boolean) {
   if (!data) throw new Error("No se pudo guardar el evento.");
   return data.archived_at as string|null;
 }
-export async function removeEvent(id: string) {
-  // Logical deletion preserves objects for recovery; documented manual retention/cleanup.
-  const { data, error } = await supabase().from("events").update({ active: false, deleted_at: new Date().toISOString() }).eq("id", id).select("id").single();
-  check(error); if (!data) throw new Error("No se pudo eliminar el evento.");
+export async function removeEvent(id:string,onProgress?:(text:string)=>void){
+  await deleteResource({eventId:id,onProgress});
 }
+
 type PhotoRow = { id: string; storage_path: string; storage_provider:StorageProvider; author: string; like_count: number; liked: boolean; favorite: boolean };
 export async function loadGallery(eventId: string, page: number, favorites: boolean, userId: string): Promise<{ photos: Photo[]; total: number }> {
   const db = supabase();

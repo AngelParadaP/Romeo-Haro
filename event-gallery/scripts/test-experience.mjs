@@ -93,7 +93,7 @@ process.env.NEXT_PUBLIC_SUPABASE_URL='https://example.test';process.env.NEXT_PUB
 // cloud.ts captures public configuration at module initialization.
 new Function('require','module','exports',cloudSource)(specifier=>{
  if(specifier==='@supabase/supabase-js')return {createClient:()=>cloudDB};
- if(specifier==='./maps')return {};
+ if(specifier==='./maps'||specifier==='./deletions')return {};
  if(specifier==='./storage-client')return {driveURLs:async(bucket,paths,provider)=>{if(provider==='google-drive')throw new Error('Falta configurar DRIVE_ENCRYPTION_KEY');return ['https://example.test/r2.jpg'];}};
  throw new Error(`Unexpected test import ${specifier}`);
 },cloudModule,cloudModule.exports);

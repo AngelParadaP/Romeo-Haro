@@ -1,4 +1,5 @@
 "use client";
+import {useModalScrollLock} from "@/lib/use-modal-scroll-lock";
 /* eslint-disable @next/next/no-img-element */
 import { useEffect, useState } from "react";
 import { invitationFile } from '@/lib/invitation';
@@ -8,6 +9,7 @@ const defaultText='Te invitamos a compartir tus mejores recuerdos.';
 export function ShareDialog({ id, title, invitationText=defaultText, canEdit=false, onSaveText, local, onClose }: {
   id:string;title:string;invitationText?:string;canEdit?:boolean;onSaveText?:(text:string)=>Promise<boolean>;local:boolean;onClose:()=>void;
 }) {
+  useModalScrollLock();
   const [preview,setPreview]=useState('');const [file,setFile]=useState<File|null>(null);const [url,setUrl]=useState('');const [message,setMessage]=useState('');const [busy,setBusy]=useState(false);
   const [draft,setDraft]=useState(invitationText);
   const invitation=canEdit?draft:invitationText;

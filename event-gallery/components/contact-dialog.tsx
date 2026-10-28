@@ -1,10 +1,12 @@
 "use client";
+import {useModalScrollLock} from "@/lib/use-modal-scroll-lock";
 import { useEffect,useState } from 'react';
 import { cloudConfigured,loadStudio,saveStudio } from '@/lib/cloud';
 import type {StudioContact} from '@/lib/types';
 import {Icon} from './icon';
 const empty:StudioContact={name:'Romeo Haro',email:'',whatsapp:'',address:''};
 export function ContactDialog({eventId,editing=false,onClose}:{eventId?:string;editing?:boolean;onClose:()=>void}){
+  useModalScrollLock();
   const [contact,setContact]=useState<StudioContact>(empty);const [loading,setLoading]=useState(true);const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [loadError,setLoadError]=useState('');const [retry,setRetry]=useState(0);
   useEffect(()=>{let alive=true;setLoading(true);setLoadError('');
     (async()=>{try{const value=cloudConfigured?await loadStudio(editing?undefined:eventId):JSON.parse(localStorage.getItem('romeo-studio-contact')||'null');if(alive)setContact(value||empty);}catch(err){if(alive)setLoadError(err instanceof Error?err.message:'No se pudo cargar el contacto.');}finally{if(alive)setLoading(false);}})();

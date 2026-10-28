@@ -213,8 +213,16 @@ En **Compartir evento y QR**, el fotógrafo dispone del editor y el botón **Gua
 
 Se retiró la estrella decorativa de la invitación y de la marca en la interfaz; la acción de favoritos usa ahora un marcador.
 
-Las fotos individuales tienen solo **Guardar** y **Compartir**, con instrucciones separadas. **Guardar no escribe directamente en la fototeca de iOS**: la web debe abrir el menú nativo y el usuario elige Guardar imagen. Compartir abre ese mismo menú para seleccionar un destinatario o aplicación. Los navegadores no permiten preseleccionar esas acciones del sistema. No se ofrece una descarga de archivo o ZIP en el modal individual. Los ZIP siguen disponibles en la galería y favoritos para conjuntos completos.
+Las fotos individuales usan **Guardar y compartir**, con una guía para elegir la acción dentro del menú nativo. **Guardar no escribe directamente en la fototeca de iOS**: la web debe abrir el menú nativo y el usuario elige Guardar imagen. Compartir abre ese mismo menú para seleccionar un destinatario o aplicación. Los navegadores no permiten preseleccionar esas acciones del sistema. No se ofrece una descarga de archivo o ZIP en el modal individual. Los ZIP siguen disponibles en la galería y favoritos para conjuntos completos.
 
-Al pulsar Guardar fotografía desde la vista ampliada, se cierra el zoom antes de abrir el modal de opciones. Así solo queda un modal de fotografía abierto. La opción móvil por grupos también separa Guardar imágenes y Compartir; cuando el navegador no admite grupos, ofrece las acciones individuales.
+Al pulsar Guardar fotografía desde la vista ampliada, se cierra el zoom antes de abrir el modal de opciones. Así solo queda un modal de fotografía abierto. La opción móvil por grupos usa también Guardar y compartir; cuando el navegador no admite grupos, ofrece las acciones individuales.
 
 Verificado con PostgreSQL embebido: persistencia, límite de longitud y rechazo de cambios de texto por invitados. Verificado en navegador de prueba: ausencia de editor/campo de enlace para invitados, dos botones individuales y un único modal al pasar del zoom a las opciones. La elección de Guardar imagen en el menú nativo debe comprobarse en iOS/Android real.
+
+## Ajuste de interfaz: acción unificada y desplazamiento móvil
+
+Las fotografías individuales y los grupos vuelven a usar un solo botón **Guardar y compartir** para abrir el menú nativo. El guardado directo en la fototeca continúa dependiendo del sistema. En navegadores que no permiten compartir archivos, se conserva la alternativa de abrir la imagen y guardarla desde su menú contextual. El botón **Mis favoritos** usa el mismo marcador que las tarjetas.
+
+Se limita el rebote fuera del contenido y el desbordamiento horizontal de la página, se usan alturas de viewport dinámicas en los modales y se bloquea el desplazamiento del fondo mientras están abiertos. Al cerrarlos se restaura la posición de lectura; la galería mantiene su desplazamiento normal para recorrer todas las fotografías. Los campos móviles usan 16 px para evitar el zoom automático al escribir. Estos cambios no añaden ninguna migración de base de datos.
+
+Moderación de fotos y álbum curado siguen siendo propuestas, no funciones implementadas por este ajuste.

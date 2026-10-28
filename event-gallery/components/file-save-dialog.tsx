@@ -1,4 +1,5 @@
 "use client";
+import {useModalScrollLock} from "@/lib/use-modal-scroll-lock";
 /* eslint-disable @next/next/no-img-element */
 import { useEffect,useState } from 'react';
 import {photoBlob} from '@/lib/downloads';
@@ -6,6 +7,7 @@ import type {Photo} from '@/lib/types';
 import {Icon} from './icon';
 import {PhotoActions} from './photo-actions';
 export function FileSaveDialog({photo,onClose}:{photo:Photo;onClose:()=>void}){
+  useModalScrollLock();
   const [file,setFile]=useState<File|null>(null);const [url,setUrl]=useState('');const [error,setError]=useState('');const [busy,setBusy]=useState(false);
   useEffect(()=>{let alive=true;let objectURL='';photoBlob(photo).then(blob=>{if(!alive)return;objectURL=URL.createObjectURL(blob);setUrl(objectURL);setFile(new File([blob],`foto-${photo.id}.jpg`,{type:'image/jpeg'}));}).catch(err=>{if(alive)setError(err instanceof Error?err.message:'No se pudo preparar la foto.');});return()=>{alive=false;if(objectURL)URL.revokeObjectURL(objectURL);};},[photo]);
   useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&!busy)onClose();};document.addEventListener('keydown',key);return()=>document.removeEventListener('keydown',key);},[busy,onClose]);

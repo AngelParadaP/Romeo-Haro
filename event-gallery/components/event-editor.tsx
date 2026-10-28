@@ -1,4 +1,5 @@
 "use client";
+import {useModalScrollLock} from "@/lib/use-modal-scroll-lock";
 /* eslint-disable @next/next/no-img-element */
 import { useEffect, useRef, useState } from 'react';
 import type { GalleryEvent } from '@/lib/types';
@@ -18,6 +19,7 @@ export function EventEditor({ event, defaultCover, defaultCategory="Boda", onClo
   event?: GalleryEvent; defaultCover: string;defaultCategory?:string; onClose: () => void;
   onSave: (event: GalleryEvent, newCover: boolean) => Promise<boolean>; onDelete?: () => Promise<void>;
 }) {
+  useModalScrollLock();
   const [draft, setDraft] = useState<GalleryEvent>(event || { id: crypto.randomUUID(), title:'', date:'', category:defaultCategory, cover:defaultCover, description:'Un día especial. Todas las miradas. Un mismo recuerdo.', active:true, photos:[],createdAt:new Date().toISOString() });
   const cropElement=useRef<HTMLDivElement>(null);
   const drag=useRef<{pointer:number;x:number;y:number;originX:number;originY:number;width:number;height:number;zoom:number}|null>(null);

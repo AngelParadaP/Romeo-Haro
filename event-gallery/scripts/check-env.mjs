@@ -39,6 +39,8 @@ if(process.env.NEXT_PUBLIC_STORAGE_PROVIDER==='r2'){
  for(const name of ['SUPABASE_SERVICE_ROLE_KEY','R2_ACCOUNT_ID','R2_BUCKET_NAME','R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY']){
   const ok=Boolean(process.env[name]);console.log(`${ok?'✓':'✗'} ${name}: ${ok?'configurada':'falta configurar'}`);if(!ok)failed=true;
  }
+ if(process.env.R2_ACCESS_KEY_ID&&!/^[a-f0-9]{32}$/i.test(process.env.R2_ACCESS_KEY_ID)){console.log('✗ R2_ACCESS_KEY_ID debe ser el Access Key ID de 32 caracteres de las credenciales S3 de R2, no el token general de Cloudflare.');failed=true;}
+ if(process.env.R2_SECRET_ACCESS_KEY&&!/^[a-f0-9]{64}$/i.test(process.env.R2_SECRET_ACCESS_KEY)){console.log('✗ R2_SECRET_ACCESS_KEY debe ser el Secret Access Key de 64 caracteres del mismo par de credenciales S3.');failed=true;}
  if(process.env.R2_ACCOUNT_ID&&!/^[a-f0-9]{32}$/i.test(process.env.R2_ACCOUNT_ID)){console.log('✗ R2_ACCOUNT_ID debe ser el ID de cuenta de 32 caracteres, no una URL.');failed=true;}
  if(process.env.R2_BUCKET_NAME&&!/^[-a-z0-9.]{3,63}$/.test(process.env.R2_BUCKET_NAME)){console.log('✗ R2_BUCKET_NAME debe ser solo el nombre del bucket.');failed=true;}
 }

@@ -102,3 +102,9 @@ Referencias oficiales:
 - https://developers.cloudflare.com/r2/api/s3/presigned-urls/
 - https://developers.cloudflare.com/r2/buckets/cors/
 - https://developers.cloudflare.com/r2/pricing/
+
+## Diagnóstico de una conexión local
+
+Si `.env.local` tiene R2 configurado pero el panel entero muestra «Falta configurar el almacenamiento», puede haber una portada antigua de Drive sin sus claves. Ahora la app usa una portada provisional para ese evento y permite entrar al estudio; edita su portada y sube una nueva para guardarla en R2. Esto no elimina ni cambia la referencia de la portada antigua hasta que guardes una nueva.
+
+`R2_ACCESS_KEY_ID` es el **Access Key ID S3 de 32 caracteres** y `R2_SECRET_ACCESS_KEY` es el **Secret Access Key de 64 caracteres** del mismo par. El token API general de Cloudflare no sirve en esos campos. La app y `npm run check:env` indican el nombre exacto del campo incorrecto sin mostrar su contenido.

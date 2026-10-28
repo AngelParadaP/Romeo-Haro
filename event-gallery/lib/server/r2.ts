@@ -1,7 +1,12 @@
 import 'server-only';
 import {AwsClient} from 'aws4fetch';
 import {setting,StorageError} from './storage-auth';
-function client(){return new AwsClient({accessKeyId:setting('R2_ACCESS_KEY_ID'),secretAccessKey:setting('R2_SECRET_ACCESS_KEY'),service:'s3',region:'auto'});}
+function client(){
+ const accessKeyId=setting('R2_ACCESS_KEY_ID');const secretAccessKey=setting('R2_SECRET_ACCESS_KEY');
+ if(!/^[a-f0-9]{32}$/i.test(accessKeyId))throw new StorageError('R2_ACCESS_KEY_ID no tiene el formato esperado. Copia el Access Key ID de las credenciales S3 de R2, no el token general de Cloudflare.',503);
+ if(!/^[a-f0-9]{64}$/i.test(secretAccessKey))throw new StorageError('R2_SECRET_ACCESS_KEY no tiene el formato esperado. Copia el Secret Access Key del mismo par de credenciales S3 de R2.',503);
+ return new AwsClient({accessKeyId,secretAccessKey,service:'s3',region:'auto'});
+}
 function objectURL(key=''){
  const account=setting('R2_ACCOUNT_ID');const bucket=setting('R2_BUCKET_NAME');
  if(!/^[a-f0-9]{32}$/i.test(account)||!/^[-a-z0-9.]{3,63}$/.test(bucket))throw new StorageError('Revisa el Account ID y el nombre del bucket de R2.',503);

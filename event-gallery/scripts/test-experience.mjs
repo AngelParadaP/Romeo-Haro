@@ -76,3 +76,31 @@ assert.equal(canGuestView(automatic,close+archiveConsultationMs-1),true);assert.
 assert.equal(canGuestView({...event,active:false},open),false);
 assert.equal(canGuestView({...archived,active:true},expires),true);
 console.log('✓ Manual and automatic archives allow 30 days of read-only consultation with exact expiry boundaries');
+
+// Regression: one legacy cover must not prevent opening every event after an R2 switch.
+const cloudSource=ts.transpileModule(await readFile(new URL('../lib/cloud.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const cloudModule={exports:{}};
+const eventRows=[
+ {id:'legacy-drive',title:'Legacy',cover:'https://example.test/fallback.jpg',cover_path:'owner/event/legacy.jpg',cover_provider:'google-drive',photos:[{count:1}]},
+ {id:'new-r2',title:'New',cover:'https://example.test/fallback.jpg',cover_path:'owner/event/new.jpg',cover_provider:'r2',photos:[{count:2}]},
+ {id:'old-supabase',title:'Old',cover:'https://example.test/fallback.jpg',cover_path:'owner/event/old.jpg',cover_provider:'supabase',photos:[{count:3}]}
+];
+const eventQuery={select(){return this;},is(){return this;},order(){return this;},eq(){return this;},then(resolve){return Promise.resolve({data:eventRows,error:null}).then(resolve);}};
+const cloudDB={from(){return eventQuery;},auth:{getUser:async()=>({data:{user:{id:'owner'}},error:null})},storage:{from:()=>({createSignedUrl:async()=>({data:{signedUrl:'https://example.test/supabase.jpg'},error:null})})}};
+// The stub client needs only nonempty public configuration; restore the environment afterward.
+const priorURL=process.env.NEXT_PUBLIC_SUPABASE_URL,priorKey=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+process.env.NEXT_PUBLIC_SUPABASE_URL='https://example.test';process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY='sb_publishable_test';
+// cloud.ts captures public configuration at module initialization.
+new Function('require','module','exports',cloudSource)(specifier=>{
+ if(specifier==='@supabase/supabase-js')return {createClient:()=>cloudDB};
+ if(specifier==='./maps')return {};
+ if(specifier==='./storage-client')return {driveURLs:async(bucket,paths,provider)=>{if(provider==='google-drive')throw new Error('Falta configurar DRIVE_ENCRYPTION_KEY');return ['https://example.test/r2.jpg'];}};
+ throw new Error(`Unexpected test import ${specifier}`);
+},cloudModule,cloudModule.exports);
+try{
+ const loaded=await cloudModule.exports.loadEvents();assert.equal(loaded.length,3);
+ assert.equal(loaded[0].cover,eventRows[0].cover);assert.equal(loaded[0].coverUnavailable,true);assert.equal(loaded[0].coverPath,eventRows[0].cover_path);assert.equal(loaded[0].coverProvider,'google-drive');
+ assert.equal(loaded[1].cover,'https://example.test/r2.jpg');assert.equal(loaded[1].coverUnavailable,false);
+ assert.equal(loaded[2].cover,'https://example.test/supabase.jpg');assert.equal(loaded[2].coverUnavailable,false);
+}finally{if(priorURL===undefined)delete process.env.NEXT_PUBLIC_SUPABASE_URL;else process.env.NEXT_PUBLIC_SUPABASE_URL=priorURL;if(priorKey===undefined)delete process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;else process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=priorKey;}
+console.log('✓ An unavailable legacy Drive cover cannot block R2/Supabase events or erase its original storage reference');

@@ -45,15 +45,21 @@ export async function loadEvents(eventId: string | null = null): Promise<Gallery
   }
   const { data, error } = await query; check(error);
   return Promise.all((data || []).map(async row => {
-    let cover = row.cover;
-    if (row.cover_path&&['google-drive','r2'].includes(row.cover_provider)) {
-      [cover]=await driveURLs('event-covers',[row.cover_path],row.cover_provider);
-    } else if (row.cover_path) {
-      const signed = await supabase().storage.from("event-covers").createSignedUrl(row.cover_path, 900); check(signed.error);
-      if (!signed.data?.signedUrl) throw new Error("No se pudo cargar la portada del evento.");
-      cover = signed.data.signedUrl;
+    let cover = row.cover;let coverUnavailable=false;
+    try {
+      if(row.cover_path&&['google-drive','r2'].includes(row.cover_provider)){
+        const [url]=await driveURLs('event-covers',[row.cover_path],row.cover_provider);
+        if(!url)throw new Error('Portada no disponible.');cover=url;
+      }else if(row.cover_path){
+        const signed=await supabase().storage.from('event-covers').createSignedUrl(row.cover_path,900);check(signed.error);
+        if(!signed.data?.signedUrl)throw new Error('Portada no disponible.');cover=signed.data.signedUrl;
+      }
+    }catch{
+      // A legacy provider or one missing cover must not block the whole studio.
+      // Keep the original path/provider so editing unrelated fields cannot lose it.
+      cover=row.cover;coverUnavailable=true;
     }
-    return { id: row.id, createdAt: row.created_at, title: row.title, date: row.date, category: row.category, active: row.active, cover,
+    return { id: row.id, createdAt: row.created_at, title: row.title, date: row.date, category: row.category, active: row.active, cover, coverUnavailable,
       description: row.description, invitationText:row.invitation_text, coverPath: row.cover_path, coverProvider:row.cover_provider, coverX: row.cover_x, coverY: row.cover_y, coverZoom: Number(row.cover_zoom),
       archivedAt:row.archived_at, archiveAfterClose:row.archive_after_close, uploadsOpenAt: row.uploads_open_at, uploadsCloseAt: row.uploads_close_at, photos: [], photoCount: row.photos?.[0]?.count ?? 0 };
   }));

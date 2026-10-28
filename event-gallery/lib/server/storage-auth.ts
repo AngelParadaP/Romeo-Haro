@@ -5,7 +5,7 @@ import {NextResponse} from 'next/server';
 export class StorageError extends Error { constructor(message:string,public status=400){super(message);} }
 export const r2Enabled=()=>process.env.NEXT_PUBLIC_STORAGE_PROVIDER==='r2';
 export const driveEnabled=()=>process.env.NEXT_PUBLIC_STORAGE_PROVIDER==='google-drive';
-export function setting(name:string){const value=process.env[name];if(!value)throw new StorageError('Falta configurar el almacenamiento en el servidor.',503);return value;}
+export function setting(name:string){const value=process.env[name];if(!value)throw new StorageError(`Falta configurar ${name} en el servidor.`,503);return value;}
 function encryptionKey(){const value=Buffer.from(setting('DRIVE_ENCRYPTION_KEY'),'base64');if(value.length!==32)throw new StorageError('La clave de cifrado del almacenamiento no es válida.',503);return value;}
 export function seal(value:unknown){const iv=randomBytes(12);const cipher=createCipheriv('aes-256-gcm',encryptionKey(),iv);const bytes=Buffer.concat([cipher.update(JSON.stringify(value)),cipher.final()]);return Buffer.concat([iv,cipher.getAuthTag(),bytes]).toString('base64url');}
 export function unseal<T>(value:string):T{try{const bytes=Buffer.from(value,'base64url');const decipher=createDecipheriv('aes-256-gcm',encryptionKey(),bytes.subarray(0,12));decipher.setAuthTag(bytes.subarray(12,28));return JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString()) as T;}catch{throw new StorageError('La autorización caducó. Actualiza la página o reconecta Drive.',401);}}

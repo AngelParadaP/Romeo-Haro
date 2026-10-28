@@ -16,7 +16,7 @@ const owner='10000000-0000-4000-8000-000000000001',guest='20000000-0000-4000-800
 Object.assign(process.env,{NEXT_PUBLIC_STORAGE_PROVIDER:'google-drive',NEXT_PUBLIC_SUPABASE_URL:'https://db.example.test',NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:'sb_publishable_test',SUPABASE_SERVICE_ROLE_KEY:'sb_secret_test',APP_URL:'https://app.example.test',GOOGLE_DRIVE_OWNER_ID:owner,GOOGLE_DRIVE_CLIENT_ID:'client-test',GOOGLE_DRIVE_CLIENT_SECRET:'secret-test',DRIVE_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64')});
 const auth=await load('lib/server/storage-auth.ts');const {NextRequest}=require('next/server');
 const connection={owner_id:owner,refresh_token_encrypted:auth.seal({refreshToken:'refresh-test'}),root_folder_id:'folder-test',account_email:'dedicated@example.test'};
-let deletionJob=null,finishedJobs=0,failDelete=false,enumerating=false;
+let deletionJob=null,finishedJobs=0,failDelete=false,enumerating=false,missingDriveRegistry=false,missingRequiredRegistry=false,legacyDriveCover=false;
 let user=guest,allow=true,hasConnection=true,registered,photoInserted=false,trashed=0,linked=false,denyInsert=false;let count=0;
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
 const jpeg=new Uint8Array([255,216,255,224,0,0,255,217]);
@@ -33,12 +33,12 @@ globalThis.fetch=async(input,init={})=>{
   if(url.pathname.endsWith('/storage_upload_leases'))return json(enumerating?[]:null);
   if(url.pathname.endsWith('/rpc/storage_access'))return json(allow);
   if(url.pathname.endsWith('/rpc/drive_access'))return json(allow);
-  if(url.pathname.endsWith('/events')&&enumerating)return json({cover_provider:'supabase',cover_path:`${owner}/${event}/current.jpg`});
+  if(url.pathname.endsWith('/events')&&enumerating)return json({cover_provider:legacyDriveCover?'google-drive':'supabase',cover_path:`${owner}/${event}/current.jpg`});
   if(url.pathname.endsWith('/events'))return json(new URLSearchParams(url.search).get('select')==='owner_id'?{owner_id:owner}:linked?[{id:event}]:[]);
   if(url.pathname.endsWith('/admin_users'))return json({user_id:owner});
   if(url.pathname.endsWith('/drive_connections'))return json(method==='GET'?(hasConnection?connection:null):null);
-  if(url.pathname.endsWith('/r2_objects')&&enumerating)return json([]);
-  if(url.pathname.endsWith('/drive_objects')&&enumerating)return json([]);
+  if(url.pathname.endsWith('/r2_objects')&&enumerating)return missingRequiredRegistry?json({code:'42501',message:'Required registry unavailable'},403):json([]);
+  if(url.pathname.endsWith('/drive_objects')&&enumerating)return missingDriveRegistry?json({code:'PGRST205',message:'Optional table not found'},404):json([]);
   if(url.pathname.startsWith('/storage/v1/object/')&&method==='DELETE'){assert.equal(body.prefixes.length,1);return json([]);}
   if(url.pathname.startsWith('/storage/v1/object/list/')&&enumerating){const prefix=body.prefix;return json([{id:'old-file',name:prefix.startsWith(owner)?'superseded.jpg':'orphan.jpg'}]);}
   if(url.pathname.endsWith('/r2_objects')){if(method==='POST'){registered=body;return json(null,201);}if(method==='DELETE'){registered=undefined;return json(null);}return json({object_key:`${url.searchParams.get('bucket')?.slice(3)||'event-photos'}/${url.searchParams.get('path')?.slice(3)||objectPath}`});}
@@ -101,4 +101,7 @@ await test('Event manifests include superseded covers and unlinked objects from 
 await test('Legacy Supabase files are removed through the Storage API',async()=>{const worker=await load('lib/server/deletion.ts');await worker.removeStoredItem({provider:'supabase',bucket:'event-photos',path:objectPath});});
 await test('R2 PUT sends the exact Content-Length for large image bodies',async()=>{const r2=await load('lib/server/r2.ts');await r2.putR2('_diagnostics/mock-image.jpg',new Blob([new Uint8Array(2*1024*1024)],{type:'image/jpeg'}));});
 await test('Photographer storage diagnostics verify upload and cleanup instead of only listing',async()=>{const status=await load('app/api/storage/status/route.ts');const before=trashed;const response=await status.POST(request('status',{method:'POST'}));assert.equal(response.status,200);assert.equal((await response.json()).writeVerified,true);assert.equal(trashed,before+1);user=guest;assert.equal((await status.POST(request('status',{method:'POST'}))).status,403);user=owner;});
+await test('R2 event manifests work after the optional Drive registry is removed',async()=>{enumerating=true;missingDriveRegistry=true;try{const worker=await load('lib/server/deletion.ts');const manifest=await worker.deletionManifest({...newJob(),photo_id:null});assert.ok(manifest.some(item=>item.provider==='r2'));assert.equal(manifest.some(item=>item.provider==='google-drive'),false);}finally{enumerating=false;missingDriveRegistry=false;}});
+await test('A required registry failure still stops cleanup instead of discarding references',async()=>{enumerating=true;missingRequiredRegistry=true;try{const worker=await load('lib/server/deletion.ts');await assert.rejects(()=>worker.deletionManifest({...newJob(),photo_id:null}),error=>error.message.includes('r2_objects'));}finally{enumerating=false;missingRequiredRegistry=false;}});
+await test('Optional-table handling never hides an actual legacy Drive cover reference',async()=>{enumerating=true;missingDriveRegistry=true;legacyDriveCover=true;try{const worker=await load('lib/server/deletion.ts');await assert.rejects(()=>worker.deletionManifest({...newJob(),photo_id:null}),/Drive/);}finally{enumerating=false;missingDriveRegistry=false;legacyDriveCover=false;}});
 console.log(`\n${count} storage route/security checks passed (R2 and legacy Drive, mocked services).`);

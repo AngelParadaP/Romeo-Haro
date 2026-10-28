@@ -22,7 +22,7 @@ export async function POST(request:Request){let claimed:string|undefined;const l
   await removeStoredItem(manifest[cursor]);cursor++;
   const saved=await serviceDB().from('deletion_jobs').update({cursor,last_error:null}).eq('id',jobId).eq('lease_token',lease);if(saved.error)throw new Error('database');
  }
- if(cursor===manifest.length){const finished=await serviceDB().rpc('finish_deletion',{job_token:jobId,claim_token:lease});if(finished.error)throw new Error('database');return privateJSON({jobId,done:true,removed:cursor,total:manifest.length});}
+ if(cursor===manifest.length){const finished=await serviceDB().rpc('finish_deletion',{job_token:jobId,claim_token:lease});if(finished.error){if(finished.error.code==='42P01'&&finished.error.message.includes('drive_objects'))throw new StorageError('Los archivos ya se procesaron, pero falta actualizar la limpieza de la base de datos. Aplica la migración 011 y continúa la limpieza.',503);throw new StorageError(`No se pudo finalizar la base de datos (${finished.error.code||'sin código'}). Se conserva el progreso para reintentar.`,503);}return privateJSON({jobId,done:true,removed:cursor,total:manifest.length});}
  const released=await serviceDB().from('deletion_jobs').update({lease_until:null,lease_token:null}).eq('id',jobId).eq('lease_token',lease);if(released.error)throw new Error('database');
  return privateJSON({jobId,done:false,removed:cursor,total:manifest.length});
 }catch(error){

@@ -394,6 +394,35 @@ await test('Previously retired events can enter permanent cleanup without reopen
  const result=await db.query('select public.begin_deletion($1) as id',[a]);assert.ok(result.rows[0].id);
  await as(guest);assert.equal((await db.query('select * from public.events where id=$1',[a])).rows.length,0);
 });
+await db.exec('reset role');
+await test('Existing Drive references cannot be discarded by an incomplete cleanup manifest',async()=>{
+ await as(owner);const id=(await db.query('select public.begin_deletion($1) as id',[a])).rows[0].id;
+ await db.exec('reset role;set role service_role');await db.query('select * from public.claim_deletion($1,$2)',[id,claim]);
+ await db.query("update public.deletion_jobs set manifest='[]'::jsonb,cursor=0 where id=$1",[id]);
+ await assert.rejects(()=>db.query('select public.finish_deletion($1,$2)',[id,claim]),/Drive/);
+ await db.exec('reset role');assert.equal(Number((await db.query('select count(*) as n from public.drive_objects where event_id=$1',[a])).rows[0].n),1);
+});
+await db.exec('drop table public.drive_objects');
+const noDriveEvent='74000000-0000-4000-8000-000000000001';const noDrivePhoto='75000000-0000-4000-8000-000000000001';const noDrivePath=`${noDriveEvent}/${guest}/${noDrivePhoto}.jpg`;
+await as(owner);await db.query("insert into public.events(id,title,date,category,cover) values ($1,'Solo R2','2026-11-14','Boda','https://example.com/test.jpg')",[noDriveEvent]);
+await db.exec('reset role');await db.query("insert into public.r2_objects(bucket,path,object_key,event_id,uploader_id,size_bytes) values ('event-photos',$1,$2,$3,$4,20)",[noDrivePath,`event-photos/${noDrivePath}`,noDriveEvent,guest]);
+await db.query("insert into public.photos(id,event_id,author_id,author,storage_path,storage_provider) values ($1,$2,$3,'Ana',$4,'r2')",[noDrivePhoto,noDriveEvent,guest,noDrivePath]);
+await test('An already processed R2 photo finishes atomically when the optional Drive table was removed',async()=>{
+ await as(owner);const id=(await db.query('select public.begin_deletion($1,$2) as id',[noDriveEvent,noDrivePhoto])).rows[0].id;
+ await db.exec('reset role;set role service_role');await db.query('select * from public.claim_deletion($1,$2)',[id,claim]);
+ await db.query(`update public.deletion_jobs set manifest='[{"provider":"r2"}]'::jsonb,cursor=1 where id=$1`,[id]);
+ await db.query('select public.finish_deletion($1,$2)',[id,claim]);await db.exec('reset role');
+ assert.equal(Number((await db.query('select count(*) as n from public.photos where id=$1',[noDrivePhoto])).rows[0].n),0);
+ assert.equal(Number((await db.query('select count(*) as n from public.r2_objects where event_id=$1',[noDriveEvent])).rows[0].n),0);
+ assert.equal(Number((await db.query('select count(*) as n from public.deletion_jobs where id=$1',[id])).rows[0].n),0);
+});
+await test('An event finishes cleanup without recreating obsolete Drive tables',async()=>{
+ await as(owner);const id=(await db.query('select public.begin_deletion($1) as id',[noDriveEvent])).rows[0].id;
+ await db.exec('reset role;set role service_role');await db.query('select * from public.claim_deletion($1,$2)',[id,claim]);await db.query("update public.deletion_jobs set manifest='[]'::jsonb where id=$1",[id]);
+ await db.query('select public.finish_deletion($1,$2)',[id,claim]);await db.exec('reset role');
+ assert.equal(Number((await db.query('select count(*) as n from public.events where id=$1',[noDriveEvent])).rows[0].n),0);
+ assert.equal((await db.query("select to_regclass('public.drive_objects') is null as absent")).rows[0].absent,true);
+});
 await db.exec("reset role; set role anon;");
 await test('Unauthenticated API requests cannot read or invoke gallery functions', async () => {
   await assert.rejects(() => db.query('select * from public.events'));

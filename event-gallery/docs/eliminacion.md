@@ -43,3 +43,9 @@ npm run test:storage
 npm run test:experience
 npm run build
 ```
+
+## Actualización 011: Drive opcional
+
+Si ya no utilizas Drive y su tabla `drive_objects` fue retirada, aplica **solo** `supabase/migrations/202610280011_optional_drive_cleanup.sql` después de la 010. Después actualiza el código y pulsa **Continuar limpieza**. La migración actualiza la función de finalización; no inicia eliminaciones ni recrea tablas antiguas.
+
+El progreso existente se reutiliza. Una foto cuyo archivo ya fue eliminado solo necesita finalizar sus registros. La enumeración de R2 y Supabase ya no exige que exista la tabla de Drive. Si todavía hay referencias reales a archivos de Drive, la limpieza exige verificarlas y no las descarta silenciosamente. Los errores de la fase final muestran ahora un código de base de datos o el paso de actualización necesario.

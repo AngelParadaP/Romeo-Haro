@@ -1,4 +1,4 @@
-import {checkR2} from '@/lib/server/r2';
+import {checkR2,putR2,deleteR2} from '@/lib/server/r2';
 import {requireDriveOwner,requirePhotographer,r2Enabled,privateJSON,fail,driveEnabled,setting,serviceDB,StorageError} from '@/lib/server/storage-auth';
 import {connection,accessToken,driveFetch} from '@/lib/server/google-drive';
 export async function GET(request:Request){
@@ -12,4 +12,14 @@ export async function GET(request:Request){
  if(!result.data)return privateJSON({provider:'google-drive',connected:false});
  const config=await connection();const token=await accessToken(config);const about=await (await driveFetch(token,'about?fields=storageQuota,user(emailAddress)')).json();
  return privateJSON({provider:'google-drive',connected:true,email:config.account_email,quota:about.storageQuota});
+}catch(error){return fail(error);}}
+
+// Explicit write test, restricted to the photographer. Never creates a gallery photo.
+export async function POST(request:Request){try{
+ const {user}=await requirePhotographer(request);if(!r2Enabled())throw new StorageError('La prueba de escritura está disponible para R2.',400);
+ const key=`_diagnostics/storage-check-${user.id}.jpg`;const bytes=new Uint8Array(2*1024*1024);bytes.set([255,216,255,224]);bytes.set([255,217],bytes.length-2);
+ let uploaded=false;
+ try{await putR2(key,new Blob([bytes],{type:'image/jpeg'}));uploaded=true;await deleteR2(key);}
+ catch(error){if(!uploaded){try{await deleteR2(key);}catch{ /* The original write error is more useful. */ }}throw error;}
+ return privateJSON({provider:'r2',connected:true,writeVerified:true});
 }catch(error){return fail(error);}}

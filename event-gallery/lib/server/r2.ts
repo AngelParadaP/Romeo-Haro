@@ -13,9 +13,9 @@ function objectURL(key=''){
  return `https://${account}.r2.cloudflarestorage.com/${bucket}${key?'/'+key.split('/').map(encodeURIComponent).join('/'):''}`;
 }
 async function send(method:string,key:string,body?:Blob){
- const request=await client().sign(objectURL(key),{method,body,headers:body?{'Content-Type':'image/jpeg','Cache-Control':'private, no-store'}:undefined});
+ const request=await client().sign(objectURL(key),{method,body,headers:body?{'Content-Type':'image/jpeg','Cache-Control':'private, no-store','Content-Length':String(body.size)}:undefined});
  const response=await fetch(request,{signal:AbortSignal.timeout(45000)});
- if(!response.ok)throw new StorageError(response.status===403?'R2 rechazó las credenciales o los permisos del bucket.':'No se pudo completar la operación en R2.',502);
+ if(!response.ok){const xml=await response.text();const rawCode=xml.match(/<Code>([^<]+)<\/Code>/)?.[1];const code=rawCode&&/^[A-Za-z0-9_]+$/.test(rawCode)?rawCode:'UnknownError';throw new StorageError(`R2 rechazó la operación ${method} (HTTP ${response.status}, ${code}).`,502);}
  return response;
 }
 export async function putR2(key:string,body:Blob){await send('PUT',key,body);}

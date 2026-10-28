@@ -65,8 +65,8 @@ Usa Node **24.x** (fijado en package.json), guarda los cambios y despliega otra 
 
 ## 5. Comprobar
 
-1. Abre **Almacenamiento → Comprobar conexión** desde el panel del fotógrafo.
-2. La comprobación valida la sesión, la migración y el acceso de lectura al bucket. No sustituye la prueba de escritura siguiente.
+1. Abre **Almacenamiento** desde el panel del fotógrafo y pulsa **Comprobar subida y limpieza**.
+2. Al abrir se validan sesión, migración y lectura. El botón crea un archivo temporal de 2 MB, verifica la escritura y lo elimina; no crea fotos en la galería. Esta prueba no sustituye comprobar la publicación de una foto real en el paso siguiente.
 3. Sube una foto de prueba como invitado y cambia la portada de un evento. Verifica que aparezcan en R2 bajo `event-photos/` y `event-covers/`.
 4. Desde otro dispositivo, comprueba ampliar, guardar/compartir, favoritos y descarga ZIP.
 
@@ -108,3 +108,7 @@ Referencias oficiales:
 Si `.env.local` tiene R2 configurado pero el panel entero muestra «Falta configurar el almacenamiento», puede haber una portada antigua de Drive sin sus claves. Ahora la app usa una portada provisional para ese evento y permite entrar al estudio; edita su portada y sube una nueva para guardarla en R2. Esto no elimina ni cambia la referencia de la portada antigua hasta que guardes una nueva.
 
 `R2_ACCESS_KEY_ID` es el **Access Key ID S3 de 32 caracteres** y `R2_SECRET_ACCESS_KEY` es el **Secret Access Key de 64 caracteres** del mismo par. El token API general de Cloudflare no sirve en esos campos. La app y `npm run check:env` indican el nombre exacto del campo incorrecto sin mostrar su contenido.
+
+## Error 411 al subir fotografías
+
+R2 requiere `Content-Length` en las peticiones PUT. El servidor envía ahora el tamaño exacto del Blob, evitando el error `MissingContentLength` en subidas que se transmiten como un stream. El mensaje de error incluye el método, estado HTTP y código de R2, sin mostrar claves ni el cuerpo completo de la respuesta. No requiere migración ni nuevas variables; despliega el código actualizado si el fallo ocurre en Vercel.
